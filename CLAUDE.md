@@ -76,7 +76,103 @@ and can never be traded alone.
 
 ---
 
-## 4. Direction is computed, never assumed
+## 4. The catalyst gate — no reason, no trade
+
+**On 2026-07-30 I bought a SPY 744 call because it fit a $22 budget, then
+invented a bull-flag story for it. Asked what news was behind it, the honest
+answer was none. A scan run afterwards showed the day's real move — the
+AI-datacenter complex, CIFR +27%, IREN +27%, RIOT +23% — which I never looked
+at.** This section exists so that cannot recur.
+
+### The order is fixed and non-negotiable
+
+1. Scan for catalysts and rank the universe
+2. Verify the catalyst against the original source
+3. Build the `DirectionalThesis`
+4. Confirm the tape agrees
+5. **Only now** open an option chain
+
+Never look at a chain first. Never let the budget choose the ticker. If nothing
+carries a verified catalyst, the answer is **no trade** — not "find something
+affordable."
+
+`require_thesis()` (`src/news/catalyst.py`) enforces this and raises rather than
+returning a default. A thesis will not construct at all unless it names:
+
+| Field | Question it answers |
+|---|---|
+| `mechanism` | *Why does this move THIS ticker?* — one specific sentence |
+| `why_not_priced` | *Where is the edge?* — why the market hasn't absorbed it |
+| `invalidation_price` | *What proves me wrong?* — a level, not a feeling |
+| `source_url` + `published_at` | *Is it real and is it new?* |
+| `expected_move_pct` vs `already_moved_pct` | *How much is left?* |
+
+Vague text ("looks good", "momentum", "seems") is rejected at construction
+unless it carries actual numbers.
+
+### The gate refuses these outright
+
+- Direction contradicting the catalyst (puts on a beat-and-raise)
+- Unverified or single-sourced news
+- Tape not confirming the direction
+- **More than 70% of the expected move already done** — that is chasing, and it
+  is what the KO trade did
+- Catalysts past their decay window: 90 minutes for fast decayers (upgrades,
+  sympathy), 6 hours for earnings and guidance
+- Catalyst types below 50% directional reliability — the direction must then
+  come from the tape, not the headline
+
+### Catalyst reliability is not uniform
+
+`CatalystType` carries an empirical bias, reliability and typical move. Treat
+them differently: an FDA rejection (82% reliable, ~15% move) is not an analyst
+upgrade (55%, ~2.5%, dead in 90 minutes). A short-squeeze setup is 48% — a coin
+flip that must never be traded on the headline alone.
+
+---
+
+## 4a. The setup playbook — technicals are triggers, not reasons
+
+`src/strategies/playbook.py`. Every setup takes an already-validated thesis. A
+chart pattern is how a fundamental reason expresses itself in price; it is never
+the reason itself.
+
+| Setup | What it requires |
+|---|---|
+| **Gap and go** | ≥2% catalyst gap, ≥2x rvol, premarket level broken **and held 2+ bars** |
+| **Opening range breakout** | ORB broken, volume expanding, index agreeing |
+| **VWAP reclaim/reject** | Fresh reclaim, 2+ structure points, **not >1.5 ATR extended** |
+| **Relative strength leader** | Outperforming *both* sector and index, holding VWAP |
+| **Failed breakout trap** | Level genuinely lost, VWAP flipped — trapped size is the fuel |
+| **First red day** | 3+ up days, >1.5 ATR extended, below VWAP with lower highs |
+| **Sympathy laggard** | Peer moved 5%+, this name has captured **<60%** of it |
+
+**Trade the leader, not the laggard.** The name outperforming its sector *and*
+the index is where institutional demand actually is. The cheap sympathy name is
+tempting at this account size and is usually the worse trade.
+
+### Risk is sized from the stop
+
+Reward-to-risk below **2:1 is declined regardless of conviction**. Entry,
+invalidation and both targets are defined *before* the order — `Setup.acceptable()`
+refuses anything without real, measurable risk.
+
+### Time of day is an edge, not a detail
+
+| Window (ET) | Quality | Note |
+|---|---|---|
+| 9:30–10:30 | **1.00** | Opening drive — highest expectancy |
+| 10:30–11:30 | 0.85 | Morning continuation |
+| **11:30–14:00** | **0.35** | Midday chop — where accounts die |
+| 14:00–15:15 | 0.80 | Afternoon trend, second-best window |
+| 15:15+ | 0.00 | Manage only, no new positions |
+
+Confidence is scaled by the session. Midday is discounted, not banned — but a
+midday setup must be materially stronger to clear the same bar.
+
+---
+
+## 4b. Direction is computed, never assumed
 
 Score bullish and bearish independently (`score_direction`). Take calls only
 when the bullish score clearly exceeds bearish, puts only on the reverse, and
