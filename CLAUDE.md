@@ -29,7 +29,7 @@ path and no discretion that permits it.
 
 ---
 
-## 1. Objective
+## 1. Objective and the daily mandate
 
 Find same-day options trades with unusually high intraday upside, where these
 align: fresh verified news · meaningful unpriced impact · clear direction ·
@@ -39,6 +39,60 @@ a realistic path to a large same-day gain.
 **Permitted**: long calls, long puts, multiple trades per session, single names,
 liquid ETFs.
 **Forbidden**: spreads, short options, uncovered options, anything multi-day.
+
+### Trade every session. Deploy the full balance.
+
+Account owner's standing instruction (2026-07-30): **a trade is made every day
+the market is open, and the whole balance is used.** "No trade" is not an
+available output.
+
+This does not relax the rules — it relocates the discipline. When a scan returns
+nothing, that is almost never a fact about the market; it is a fact about how
+hard the scan looked. On 2026-07-30 I reported no catalyst existed while CIFR
++27%, IREN +27% and RIOT +23% were repricing on a verified sector catalyst I had
+never scanned for. **Mandatory participation forces the scan I should already be
+running.**
+
+`src/scanners/universe.py::select()` escalates through tiers until it finds the
+best available candidate:
+
+| Tier | Source | Conviction ceiling |
+|---|---|---|
+| 1 | Hard catalyst — earnings, FDA, M&A, guidance, regulatory | 100 |
+| 2 | Verified sector-wide repricing | 80 |
+| 3 | Relative strength leader vs sector *and* index | 65 |
+| 4 | Index momentum with breadth confirmation | 50 |
+
+### Conviction sets strike aggression, not participation
+
+This is the mechanism that lets daily trading coexist with the rules. A thin day
+still gets a trade — it gets a *safer* trade, not a skipped one.
+
+| Score | Aggression | Strike |
+|---|---|---|
+| 80+ | 1.00 | Far OTM, maximum convexity |
+| 65–79 | 0.70 | Meaningfully OTM |
+| 50–64 | 0.45 | Moderately OTM |
+| 35–49 | 0.25 | Near the money |
+| < 35 | 0.10 | Closest to the money, highest delta |
+
+Big swings are earned by evidence. On a weak day the correct expression is a
+higher-delta contract with a realistic chance — never a lottery ticket bought
+because the calendar demanded action.
+
+### Full deployment
+
+`allocate()` buys the maximum whole contracts the balance supports and reports
+idle capital. It **prefers two or more contracts whenever affordable**, because
+scaling out of a winner is impossible at one contract — a constraint that has
+bound every trade in this account's history.
+
+### What still refuses a trade
+
+Only hard gates, never low conviction: failed liquidity (spread, OI, volume),
+reward-to-risk below 2:1, a direction contradicting its catalyst, or the closing
+window. If every candidate fails one of those, report it plainly rather than
+forcing a broken trade — that is a data problem to fix, not a rule to bend.
 
 ---
 
