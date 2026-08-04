@@ -310,6 +310,62 @@ sellout it was still a day trade, and profitable.
 
 Open-position monitoring always takes priority over hunting new trades.
 
+### 7a. Targets are measured, never guessed
+
+**On 2026-08-04 a QQQ 725 call was bought at 0.52 and sold at 0.78 for +50% in
+four minutes. QQQ closed at 723.68; the contract was worth ~$4–6 at the bell —
+an 8–11x. The exit was not the mistake. The target it was measured against
+(QQQ 717) was invented.** Two independent projections were already computable
+before 9:40am and both said ~723:
+
+| Method | Computation | Projection |
+|---|---|---|
+| Opening-range 3× extension | ORB 707.59–711.80 = 4.21 wide | **724.43** |
+| ATR projection | day low 707.59 + 1.0 ATR (15.36) | **722.95** |
+| *Discretionary guess* | — | *717* ❌ |
+| **Actual close** | | **723.68** |
+
+`measured_targets()` (`src/monitoring/exhaustion.py`) computes both every cycle.
+**When the two agree inside a third of an ATR, that midpoint is the number the
+position is managed against.** No target may be stated without it.
+
+### 7b. A pause and a top look identical — volume separates them
+
+Both stop making progress. That is why "it stopped going up" is not a sell
+signal. `classify_phase()` returns one of five states:
+
+| Phase | Tape | Action |
+|---|---|---|
+| **IMPULSE** | progress + volume expanding | hold |
+| **PAUSE** | progress stalls, **volume dries up**, structure intact | **hold — resting** |
+| **DISTRIBUTION** | progress stalls, **volume stays heavy**, rejection wicks | trim ⅓ |
+| **CLIMAX** | ≥2 ATR from VWAP on a volume spike | trim ½ into strength |
+| **REVERSAL** | VWAP lost *and* structure broken, or catalyst contradicted | exit |
+
+Speed alone is not exhaustion. A fast move that is still under 2 ATR from VWAP
+is an impulse, not a climax.
+
+### 7c. Sell when the arithmetic says the wait no longer pays
+
+The reason to sell a convex position is never that it went up. It is that the
+expected remaining gain no longer covers the cost of holding:
+
+```
+edge = P(continue) × (premium_at_target − premium_now)
+     − [ theta over the horizon + P(reverse) × giveback ]
+```
+
+`decide()` holds while `edge > 0` and trims when it turns negative — which is
+also what finally answers *selling too late*: once ≥80% of the measured move is
+captured, or theta over the remaining horizon exceeds what is left to win, the
+position reduces regardless of how good the chart looks.
+
+**Trend days extend the target rather than ending it.** `trend_day_score()` reads
+the tells early — the open is the session extreme, VWAP never lost, every
+pullback holds above the prior one — and raises P(continue). On 2026-08-04 that
+score was ≥85 by 9:36am, which is precisely when the first target should have
+been extended instead of taken.
+
 ---
 
 ## 8. End-of-day liquidation — mandatory
