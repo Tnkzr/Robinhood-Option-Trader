@@ -112,54 +112,76 @@ strategy · direction · trigger · limit · stop · target · reward:risk · sa
 size · OOS win rate · expectancy after costs · holdout · regime · reasons to
 reject. Its statistics come from the verdict; there is no field for my estimate.
 
-## 5. Live runbook (agentic account only)
+## 5. Autonomous daily schedule (agentic account only)
 
-There is no daemon: trading requires an active session. On a trading day the
-owner starts `/loop 5m run the live trading cycle per CLAUDE.md §5` before
-9:30 ET (8:30 CT), or I chain `send_later` wake-ups. I also set a one-off
-`send_later` for 15:44 ET as an end-of-day safety net.
+Runs with no prompting from the owner. A Routine, **"Agentic trader — market
+open"** (`CRON_TZ=America/Chicago 25 8 * * 1-5`), wakes this session at 8:25 CT
+every weekday. Each step below schedules the next with `send_later`, so the day
+runs itself. Wake-up messages start with `AUTONOMOUS:` and name the step.
+Times come from `python -m scripts.live calendar` — never computed by hand.
 
-**Pre-open**
+Every wake-up begins: `git pull`, then `calendar`. If `trading_day` is false,
+note it in one line and stop.
+
+**A. Pre-open (Routine, 8:25 CT)**
 1. `get_accounts` → the agentic account. `get_trade_approval_setting` (if
    approvals are on, orders wait for the owner — say so). `get_portfolio` →
-   equity. `get_equity_positions` → must match `scripts.live status`.
-2. `python -m scripts.live status --equity E`. No validated strategy → report
-   "no validated strategy — no trades today" and do only data upkeep.
-3. Fetch the previous session's daily bars for the universe (`day`, ≤10 symbols
-   per call) and `python -m scripts.ingest <saved files>`.
+   equity E. `get_equity_positions` must match `scripts.live status --equity E`;
+   a mismatch means no entries today until resolved.
+2. Kill switch present → no entries; still manage and flatten.
+3. Ensure the previous session's bars are stored: fetch `day` and `5minute`
+   bars for `config/universe.py` (≤10 symbols per call) and `scripts.ingest`.
+4. `send_later` at `eod_safety_utc` → "AUTONOMOUS: step C — end-of-day flatten",
+   and at `postclose_utc` → "AUTONOMOUS: step D — post-close".
+5. If a strategy is validated **or** the journal has open positions:
+   `send_later` at `next_cycle_utc` → "AUTONOMOUS: step B — trading cycle".
+   Otherwise no intraday cycles are needed — say so in one line.
 
-**Every cycle** (~20 s after each 5-minute bar closes, 9:35–15:55 ET)
-1. Fetch today's 5-minute bars from 9:30 ET for the universe, 10 symbols per call
+**B. Trading cycle (every 5 minutes, ~1 min after each bar closes)**
+1. **First** `send_later` the next cycle at `next_cycle_utc` (if not null), so a
+   failure mid-cycle can't break the chain.
+2. Fetch today's 5-minute bars from 9:30 ET for the universe, 10 symbols per call
    (3 calls); `python -m scripts.ingest <saved files>`.
-2. `python -m scripts.live scan --equity E` (E = current `get_portfolio` value).
-3. **Exits first.** For each exit: `get_equity_positions` for the exact shares,
+3. `python -m scripts.live scan --equity E` (E = current `get_portfolio` value).
+4. **Exits first.** For each exit: `get_equity_positions` for the exact shares,
    `place_equity_order` sell, type `market`, `regular_hours`, fresh `ref_id`;
    confirm the fill with `get_equity_orders`; `scripts.live record-exit`.
-4. **Entries.** For each entry: `get_equity_quotes` → `scripts.live quote-ok SYM
-   BID ASK` (skip if it fails); skip if the ask is at or through the stop or
-   target; `review_equity_order` then `place_equity_order` with the scan's order
-   block (market, fractional quantity, `regular_hours`, fresh `ref_id`); poll
+5. **Entries.** For each: `get_equity_quotes` → `scripts.live quote-ok SYM BID ASK`
+   (skip on failure); skip if the ask is at or through the stop or target;
+   `review_equity_order`, then `place_equity_order` with the scan's order block
+   (market, fractional quantity, `regular_hours`, fresh `ref_id`); poll
    `get_equity_orders` until filled; `scripts.live record-entry '<signal json>'
-   --fill <avg price> --shares <filled qty> --order-id … --entry-ts …`. Rejected or
-   unfilled → not a position; record nothing.
-5. **Reconcile**: journal open positions must equal broker positions. Any mismatch
-   → no new entries until resolved, and tell the owner.
+   --fill <avg price> --shares <filled qty> --order-id … --entry-ts …`.
+   Rejected or unfilled → not a position; record nothing.
+6. **Reconcile**: journal open positions must equal broker positions. Mismatch →
+   no new entries; tell the owner.
+7. After any fill: commit and push `journal/live_trades.jsonl` immediately — the
+   container can be reclaimed between wake-ups.
 
-**End of day**: from 15:45 ET every open position appears as an `eod` exit — sell
-them. 15:50: `get_equity_positions` must show nothing from the journal. 15:55:
-hard check; if anything is still open, sell at market and report it.
+**C. End-of-day flatten (`eod_safety_utc`, 15:44 ET)** — runs even if cycles
+stopped. Sell every open journal position at market (`regular_hours`), confirm
+fills, `record-exit --reason eod`, then `get_equity_positions`: nothing from the
+journal may remain. If anything does, sell again and `send_later` a re-check at
+15:53 ET. Commit and push the journal.
 
-**After the close**: fetch the full session's bars and ingest; write
-`journal/YYYY-MM-DD.md` (trades, slippage vs model, R, exit reasons, degradation
-status); commit and push data, journal and ledger.
+**D. Post-close (`postclose_utc`, 16:15 ET)**
+1. Fetch the full session's `5minute` and `day` bars for the universe; ingest.
+2. If any trade happened: write `journal/YYYY-MM-DD.md` (trades, slippage vs
+   model, R, exit reasons, degradation status).
+3. If `last_session_of_week`: `python -m scripts.research --holdout`; report any
+   verdict change in plain words.
+4. Commit and push data, journal and research; end with a 2–4 line summary.
 
-**Weekly**: `python -m scripts.research --holdout`. A `degraded` strategy is halted
-by the scanner until fresh research is run; nothing is ever re-tuned on the fly.
+**Failure handling.** A failed tool call never blocks steps C and D. If the
+broker tools are unavailable, make no entries and report it. Never retry an
+order with a new `ref_id` without first checking `get_equity_orders` — that is
+how duplicate orders happen.
 
 **Known live limitations**: fractional positions can't carry a broker-side stop,
 so stops are enforced on 5-minute closes — fills can be worse than the
 backtest's intrabar stop. Every fill's slippage goes in the journal and the
-degradation monitor.
+degradation monitor. There is no persistent process: if a wake-up is missed,
+the next one recovers from the journal and broker state.
 
 ## 6. News and other vetoes
 
@@ -191,7 +213,7 @@ DTE (never 3–9), spread ≤10% of mark, OI ≥500, volume ≥100, limit orders
 python -m pytest -q
 python -m scripts.ingest <tool-result-file> ...
 python -m scripts.research [--holdout] [--families ...] [--symbols ...]
-python -m scripts.live scan --equity E | status --equity E | quote-ok SYM BID ASK
+python -m scripts.live calendar | scan --equity E | status --equity E | quote-ok SYM BID ASK
 python -m scripts.live record-entry '<signal json>' --fill F --shares N --order-id ID --entry-ts TS
 python -m scripts.live record-exit ENTRY_ID --fill F --reason stop|target|eod|manual --order-id ID --exit-ts TS
 ```

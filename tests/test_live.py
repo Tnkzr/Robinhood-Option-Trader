@@ -180,3 +180,34 @@ def test_spread_check():
     assert not spread_ok("SPY", 777.0, 778.0, c)[0]
     assert not spread_ok("SPY", 0, 778.0, c)[0]
     assert c.half_spread_for("COIN") > c.half_spread_for("AAPL")
+
+
+# --------------------------------- calendar ---------------------------------
+
+def cal(y, m, d, hh, mm):
+    from scripts.live import calendar
+    return calendar(datetime(y, m, d, hh, mm, tzinfo=ET).astimezone(timezone.utc))
+
+
+def test_calendar_phases_and_cycle_times():
+    pre = cal(2026, 10, 14, 9, 25)                       # Wednesday, 8:25 CT
+    assert pre["trading_day"] and pre["phase"] == "preopen"
+    assert pre["next_cycle_utc"] == "2026-10-14T13:36+00:00"    # 9:36 ET, first bar closed
+    mid = cal(2026, 10, 14, 11, 2)
+    assert mid["phase"] == "open" and mid["next_cycle_utc"] == "2026-10-14T15:06+00:00"
+    assert cal(2026, 10, 14, 15, 20)["phase"] == "manage_only"
+    late = cal(2026, 10, 14, 15, 52)
+    assert late["phase"] == "flatten" and late["next_cycle_utc"] is None
+    assert pre["eod_safety_utc"] == "2026-10-14T19:44+00:00"
+
+
+def test_calendar_holidays_early_closes_and_dst():
+    assert not cal(2026, 11, 26, 9, 0)["trading_day"]           # Thanksgiving
+    assert not cal(2026, 10, 17, 9, 0)["trading_day"]           # Saturday
+    half = cal(2026, 11, 27, 9, 25)
+    assert half["close_et"] == "13:00" and half["flatten_at_et"] == "12:45"
+    est = cal(2026, 11, 2, 9, 25)                               # after DST ends
+    assert est["next_cycle_utc"] == "2026-11-02T14:36+00:00"
+    assert cal(2026, 10, 16, 9, 0)["last_session_of_week"]       # Friday
+    assert not cal(2026, 11, 25, 9, 0)["last_session_of_week"]   # Fri 11/27 still trades
+    assert cal(2026, 7, 2, 9, 0)["last_session_of_week"]         # Fri 7/3 is a holiday

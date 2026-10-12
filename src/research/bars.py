@@ -166,13 +166,38 @@ def to_sessions(bars: list[Bar], symbol: str, interval: str,
     return sessions, excluded
 
 
-# NYSE 1:00 PM closes. Full-day holidays need no entry: no bars exist for them.
-# Update annually from the NYSE calendar.
+# NYSE calendar. Update annually from nyse.com/markets/hours-calendars.
+NYSE_HOLIDAYS = {
+    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3),
+    date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
+    date(2026, 11, 26), date(2026, 12, 25),
+    date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15), date(2027, 3, 26),
+    date(2027, 5, 31), date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6),
+    date(2027, 11, 25), date(2027, 12, 24),
+}
 EARLY_CLOSES = {date(2026, 11, 27), date(2026, 12, 24), date(2027, 11, 26)}
+CALENDAR_THROUGH = date(2027, 12, 31)
+
+
+def is_trading_day(d: date) -> bool:
+    if d > CALENDAR_THROUGH:
+        raise ValueError(f"NYSE calendar in src/research/bars.py ends {CALENDAR_THROUGH}; "
+                         f"extend it before trading {d}")
+    return d.weekday() < 5 and d not in NYSE_HOLIDAYS
 
 
 def scheduled_close(d: date) -> datetime:
     return datetime.combine(d, EARLY_CLOSE if d in EARLY_CLOSES else RTH_CLOSE, ET)
+
+
+def next_cycle_at(now: datetime, step_min: int = 5, delay_s: int = 60) -> datetime:
+    """When the next live cycle should run: just after the next bar closes."""
+    et = now.astimezone(ET)
+    base = et.replace(second=0, microsecond=0)
+    mins = (base.hour * 60 + base.minute) - (9 * 60 + 30)
+    nxt = base + timedelta(minutes=step_min - mins % step_min) if mins >= 0 \
+        else datetime.combine(et.date(), RTH_OPEN, ET) + timedelta(minutes=step_min)
+    return nxt + timedelta(seconds=delay_s)
 
 
 def live_session(bars: list[Bar], symbol: str, interval: str, day: date,

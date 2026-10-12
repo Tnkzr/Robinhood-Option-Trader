@@ -5,6 +5,7 @@
     python -m scripts.live record-entry SIGNAL_JSON --fill F --shares N --order-id ID --entry-ts TS
     python -m scripts.live record-exit ENTRY_ID --fill F --reason R --order-id ID --exit-ts TS
     python -m scripts.live status --equity 1000
+    python -m scripts.live calendar [--now TS]     # trading day? phase? when is the next cycle?
 
 Orders are placed by Claude through the broker tools, following CLAUDE.md §6.
 """
@@ -19,7 +20,10 @@ from config.settings import RiskLimits, Settings
 from config.universe import UNIVERSE
 from src.execution.journal import LiveJournal
 from src.execution.live import EntrySignal, scan, spread_ok
-from src.research.bars import BarStore
+from datetime import timedelta
+
+from src.research.bars import (ET, BarStore, is_trading_day, next_cycle_at,
+                               scheduled_close)
 from src.research.costs import CostModel
 from src.research.edge import VerdictStore
 from src.risk.limits import kill_switch_engaged
@@ -91,6 +95,36 @@ def cmd_status(a) -> int:
     return 0
 
 
+def calendar(now: datetime) -> dict:
+    d = now.astimezone(ET).date()
+    out = {"now_et": now.astimezone(ET).isoformat(timespec="minutes"), "date": str(d),
+           "trading_day": is_trading_day(d)}
+    if not out["trading_day"]:
+        return {**out, "phase": "closed"}
+    close = scheduled_close(d)
+    open_ = close.replace(hour=9, minute=30)
+    cut, flat = close - timedelta(minutes=45), close - timedelta(minutes=15)
+    et = now.astimezone(ET)
+    phase = ("preopen" if et < open_ else "open" if et < cut else "manage_only" if et < flat
+             else "flatten" if et < close else "closed")
+    nxt = next_cycle_at(now)
+    nd = d + timedelta(days=1)
+    while not is_trading_day(nd):
+        nd += timedelta(days=1)
+    utc = lambda x: x.astimezone(timezone.utc).isoformat(timespec="minutes")
+    return {**out, "phase": phase, "close_et": close.strftime("%H:%M"),
+            "entry_cutoff_et": cut.strftime("%H:%M"), "flatten_at_et": flat.strftime("%H:%M"),
+            "next_cycle_utc": utc(nxt) if nxt < close - timedelta(minutes=4) else None,
+            "eod_safety_utc": utc(flat - timedelta(minutes=1)),
+            "postclose_utc": utc(close + timedelta(minutes=15)),
+            "last_session_of_week": nd.isocalendar()[1] != d.isocalendar()[1]}
+
+
+def cmd_calendar(a) -> int:
+    print(json.dumps(calendar(_ts(a.now)), indent=1))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -117,8 +151,10 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("status")
     st.add_argument("--equity", type=float, required=True)
     st.add_argument("--now")
+    c = sub.add_parser("calendar")
+    c.add_argument("--now")
     a = ap.parse_args(argv)
-    return {"scan": cmd_scan, "quote-ok": cmd_quote_ok, "record-entry": cmd_record_entry,
+    return {"calendar": cmd_calendar, "scan": cmd_scan, "quote-ok": cmd_quote_ok, "record-entry": cmd_record_entry,
             "record-exit": cmd_record_exit, "status": cmd_status}[a.cmd](a)
 
 
