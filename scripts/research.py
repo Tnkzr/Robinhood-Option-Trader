@@ -1,7 +1,8 @@
 """Walk-forward research over the stored bars.
 
-    python -m scripts.research --symbols SPY,QQQ,AAPL --families orb,momentum
-    python -m scripts.research ... --holdout      # one-time holdout for families that pass
+    python -m scripts.research                    # long-only families, full universe
+    python -m scripts.research --holdout          # + one-time holdout for families that pass
+    python -m scripts.research --symbols SPY,QQQ --families orb,momentum
 
 Every run is appended to research/ledger.jsonl; reports go to research/reports/.
 The holdout is evaluated only for families that pass walk-forward, and never
@@ -12,20 +13,21 @@ from __future__ import annotations
 import argparse
 
 from config.settings import RiskLimits
+from config.universe import UNIVERSE
 from src.research.bars import BarStore
 from src.research.costs import CostModel
 from src.research.edge import EdgeCriteria, VerdictStore
 from src.research.ledger import HoldoutReuse, Ledger, new_run_id
 from src.research.pipeline import (evaluate_holdout, load_dataset, render, research_family,
                                    write_report)
-from src.research.strategies import FAMILIES
+from src.research.strategies import LONG_ONLY_FAMILIES
 from src.research.walkforward import WFConfig
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--symbols", required=True)
-    ap.add_argument("--families", default=",".join(FAMILIES))
+    ap.add_argument("--symbols", default=",".join(UNIVERSE))
+    ap.add_argument("--families", default=",".join(LONG_ONLY_FAMILIES))
     ap.add_argument("--store", default="data/bars")
     ap.add_argument("--holdout", action="store_true")
     ap.add_argument("--equity", type=float, default=25_000.0)
@@ -36,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     ds = load_dataset(BarStore(a.store), [s.strip().upper() for s in a.symbols.split(",")])
-    costs = CostModel().stressed(a.cost_mult)
+    costs = CostModel.calibrated().stressed(a.cost_mult)
     crit, cfg = EdgeCriteria(), WFConfig()
     limits = RiskLimits(allow_short=a.allow_short)
     ledger, verdicts, run_id = Ledger(), VerdictStore(), new_run_id()

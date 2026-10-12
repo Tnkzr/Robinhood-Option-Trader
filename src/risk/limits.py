@@ -13,47 +13,57 @@ from datetime import date, datetime, timedelta
 from config.settings import RiskLimits
 
 
+MIN_NOTIONAL = 1.0      # Robinhood's smallest dollar-based order
+
+
 @dataclass(frozen=True)
 class SizeDecision:
-    shares: int
+    shares: float
     risk_dollars: float
     notional: float
     reason: str | None = None   # set when shares == 0
 
 
+def _floor(x: float, decimals: int) -> float:
+    k = 10 ** decimals
+    return math.floor(x * k + 1e-9) / k
+
+
 def position_size(equity: float, entry: float, stop: float, limits: RiskLimits,
                   gross_exposure: float = 0.0) -> SizeDecision:
-    """Shares such that a fill at the stop loses at most risk_per_trade_pct.
-
-    Also capped so total notional stays within max_gross_leverage. Rounds down:
-    a size that cannot be expressed in whole shares is refused, not rounded up.
+    """The largest size within every cap — risk at the stop, capital committed,
+    and gross leverage. Always rounds down (to whole shares, or 6 decimals when
+    fractional shares are enabled); never rounds up to make a trade fit.
     """
     per_share = abs(entry - stop)
     if equity <= 0:
         return SizeDecision(0, 0.0, 0.0, "no equity")
     if per_share <= 0 or entry <= 0:
         return SizeDecision(0, 0.0, 0.0, "stop must differ from entry")
-    by_risk = math.floor(equity * limits.risk_per_trade_pct / per_share)
-    room = equity * limits.max_gross_leverage - gross_exposure
-    by_notional = math.floor(max(room, 0.0) / entry)
-    shares = min(by_risk, by_notional)
-    if shares < 1:
-        why = ("risk budget below one share" if by_risk < 1
-               else "no notional room under leverage cap")
+    room = min(equity * limits.max_position_pct,
+               equity * limits.max_gross_leverage - gross_exposure)
+    raw = min(equity * limits.risk_per_trade_pct / per_share, max(room, 0.0) / entry)
+    shares = _floor(raw, 6) if limits.fractional_shares else float(math.floor(raw))
+    notional = shares * entry
+    if shares <= 0 or notional < (MIN_NOTIONAL if limits.fractional_shares else entry):
+        why = ("no capital room under position/leverage caps" if room < MIN_NOTIONAL
+               else "risk budget below one share" if not limits.fractional_shares
+               else "size below the minimum order")
         return SizeDecision(0, 0.0, 0.0, why)
-    return SizeDecision(shares, round(shares * per_share, 2), round(shares * entry, 2))
+    return SizeDecision(shares, round(shares * per_share, 2), round(notional, 2))
 
 
 def option_contracts_for_risk(equity: float, premium_per_contract: float,
                               limits: RiskLimits) -> SizeDecision:
-    """Long premium: the whole premium is the loss at the stop."""
+    """Long premium: the whole premium is both the capital and the loss at the stop."""
     if premium_per_contract <= 0:
         return SizeDecision(0, 0.0, 0.0, "invalid premium")
-    n = math.floor(equity * limits.risk_per_trade_pct / premium_per_contract)
+    budget = equity * min(limits.risk_per_trade_pct, limits.max_position_pct)
+    n = math.floor(budget / premium_per_contract)
     if n < 1:
         return SizeDecision(0, 0.0, 0.0,
                             f"one contract (${premium_per_contract:.2f}) exceeds "
-                            f"risk budget ${equity * limits.risk_per_trade_pct:.2f}")
+                            f"the per-trade budget ${budget:.2f}")
     cost = round(n * premium_per_contract, 2)
     return SizeDecision(n, cost, cost)
 
@@ -62,7 +72,7 @@ def option_contracts_for_risk(equity: float, premium_per_contract: float,
 class OpenPosition:
     symbol: str
     direction: int          # +1 long, -1 short
-    shares: int
+    shares: float
     entry: float
     stop: float
 
@@ -150,6 +160,10 @@ def check_new_entry(state: RiskState, *, symbol: str, direction: int, entry: flo
     if risk_dollars > budget + 0.01:
         f.append(f"risk ${risk_dollars:.2f} exceeds {limits.risk_per_trade_pct:.2%} "
                  f"budget ${budget:.2f}")
+    cap = limits.max_position_pct * state.equity
+    if notional > cap + 0.01:
+        f.append(f"position ${notional:.2f} exceeds {limits.max_position_pct:.0%} "
+                 f"of equity (${cap:.2f})")
     if state.gross_exposure + notional > limits.max_gross_leverage * state.equity + 0.01:
         f.append("gross exposure would exceed leverage cap")
     last = state.last_loss_at.get(symbol)

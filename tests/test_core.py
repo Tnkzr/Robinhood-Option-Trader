@@ -175,7 +175,7 @@ def base_preflight(**over):
     kw = dict(settings=Settings(), session=SessionClock().state(at(11, 0)),
               stock_quote=fresh(), option_quote=fresh(), is_halted=False,
               trigger_still_valid=True, catalyst_still_valid=True,
-              minutes_needed=30.0, cost=5.0, account_value=1000.0,
+              minutes_needed=30.0, cost=100.0, account_value=1000.0,
               open_positions=0, daily_pnl_pct=0.0, consecutive_losses=0,
               kill_switch=False, dup=None)
     kw.update(over)
@@ -196,7 +196,7 @@ def test_preflight_happy_path():
     ({"session": SessionClock().state(at(15, 30))}, "entry window closed"),
     ({"open_positions": 9}, "position limit"),
     ({"cost": 900.0}, "exceeds"),
-    ({"cost": 5.01}, "risk cap"),
+    ({"cost": 100.01}, "risk cap"),
     ({"daily_pnl_pct": -0.02}, "daily loss limit"),
     ({"consecutive_losses": 3}, "consecutive losses"),
     ({"kill_switch": True}, "kill switch"),
@@ -253,7 +253,9 @@ def test_live_execution_requires_explicit_authorization():
     assert not ok and "not authorized" in why
 
 
-def test_authorization_comes_only_from_exact_phrase(monkeypatch):
+def test_authorization_comes_only_from_exact_phrase(monkeypatch, tmp_path):
+    import config.settings as cs
+    monkeypatch.setattr(cs, "LIVE_AUTHORIZATION_FILE", str(tmp_path / "none.json"))
     monkeypatch.setenv("TRADER_MODE", "live")
     monkeypatch.setenv("TRADER_LIVE_AUTHORIZATION", "yes")
     assert not Settings.from_env().live_authorized
@@ -371,3 +373,15 @@ def test_rank_filters_and_orders():
                          score_direction(cat(), tape, TH), contract_score=10.0)
     out = rank([weak_o, strong_o], TH)
     assert [o.ticker for o in out] == ["A"]
+
+
+def test_committed_authorization_file_must_carry_the_exact_phrase(monkeypatch, tmp_path):
+    import json
+    import config.settings as cs
+    f = tmp_path / "auth.json"
+    monkeypatch.setattr(cs, "LIVE_AUTHORIZATION_FILE", str(f))
+    monkeypatch.delenv("TRADER_LIVE_AUTHORIZATION", raising=False)
+    f.write_text(json.dumps({"phrase": "sure"}))
+    assert not Settings.from_env().live_authorized
+    f.write_text(json.dumps({"phrase": "i-authorize-live-trading"}))
+    assert Settings.from_env().live_authorized

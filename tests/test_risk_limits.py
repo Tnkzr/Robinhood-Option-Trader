@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,7 +17,10 @@ from src.research.portfolio import run_portfolio
 from src.risk.limits import (OpenPosition, RiskState, check_new_entry, kill_switch_engaged,
                              option_contracts_for_risk, position_size)
 
-L = RiskLimits()
+# Mechanics are tested under a tight, whole-share policy so the arithmetic is
+# easy to verify; the live defaults have their own tests below.
+L = RiskLimits(risk_per_trade_pct=0.005, max_position_pct=1.0, fractional_shares=False)
+LIVE = RiskLimits()
 D = date(2026, 6, 15)
 AT = datetime(2026, 6, 15, 15, 0, tzinfo=timezone.utc)
 NO_COST = CostModel(sec_fee_rate=0.0, taf_per_share=0.0)
@@ -40,6 +44,40 @@ def test_size_refuses_rather_than_rounding_up():
 def test_option_risk_is_the_premium():
     assert option_contracts_for_risk(25_000, 52.0, L).shares == 2
     assert option_contracts_for_risk(1_000, 52.0, L).shares == 0
+
+
+# ------------------------- owner's 10%-per-trade policy ---------------------
+
+def test_live_policy_caps_capital_committed_at_ten_percent():
+    s = position_size(1_000, 100.0, 99.0, LIVE)
+    assert s.notional == pytest.approx(100.0) and s.shares == pytest.approx(1.0)
+    assert s.risk_dollars == pytest.approx(1.0)          # 1% stop on $100 committed
+
+
+def test_live_policy_uses_fractional_shares_and_rounds_down():
+    s = position_size(500, 777.83, 770.0, LIVE)
+    assert s.shares == pytest.approx(0.064281) and s.notional <= 50.0
+
+
+def test_live_policy_caps_loss_at_ten_percent_for_wide_stops():
+    s = position_size(1_000, 100.0, 1.0, LIVE)          # absurd 99% stop
+    assert s.notional <= 100.0 and s.risk_dollars <= 100.0
+
+
+def test_live_policy_refuses_dust():
+    assert position_size(5, 100.0, 99.0, LIVE).shares == 0   # $0.50 order
+
+
+def test_live_option_premium_capped_at_ten_percent():
+    assert option_contracts_for_risk(1_000, 95.0, LIVE).shares == 1
+    assert option_contracts_for_risk(1_000, 101.0, LIVE).shares == 0
+
+
+def test_entry_blocked_above_position_cap():
+    st = RiskState(session=D, start_equity=1_000)
+    r = check_new_entry(st, symbol="XYZ", direction=1, entry=100.0, stop=99.0,
+                        risk_dollars=1.5, notional=150.0, limits=LIVE, at=AT)
+    assert not r and any("10% of equity" in f for f in r.failures)
 
 
 def state(**kw) -> RiskState:
@@ -119,7 +157,7 @@ def test_three_consecutive_losses_halt_the_session():
 
 
 def test_daily_loss_limit_halts_new_entries():
-    lim = RiskLimits(max_consecutive_losses=99)
+    lim = replace(L, max_consecutive_losses=99)
     ts = [mk_trade(-1.0, D, symbol=f"S{i}", minute=10 * i, hold_min=5) for i in range(8)]
     res = run_portfolio(ts, lim, 10_000, NO_COST)
     # sizing follows equity: after -$197 (-1.97%) one more fits, then -2.46% halts

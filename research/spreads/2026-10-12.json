@@ -1,0 +1,157 @@
+{
+ "as_of": "2026-10-12T19:38:49Z",
+ "note": "late-session spreads; the open is wider",
+ "quotes": {
+  "AAPL": {
+   "ask": 340.82,
+   "bid": 340.79,
+   "half_spread_bps": 0.44
+  },
+  "AMD": {
+   "ask": 594.34,
+   "bid": 594.12,
+   "half_spread_bps": 1.851
+  },
+  "AMZN": {
+   "ask": 259.58,
+   "bid": 259.56,
+   "half_spread_bps": 0.385
+  },
+  "AVGO": {
+   "ask": 355.41,
+   "bid": 355.35,
+   "half_spread_bps": 0.844
+  },
+  "BA": {
+   "ask": 189.62,
+   "bid": 189.54,
+   "half_spread_bps": 2.11
+  },
+  "COIN": {
+   "ask": 178.33,
+   "bid": 178.18,
+   "half_spread_bps": 4.207
+  },
+  "CRM": {
+   "ask": 232.42,
+   "bid": 232.31,
+   "half_spread_bps": 2.367
+  },
+  "DIA": {
+   "ask": 517.58,
+   "bid": 517.55,
+   "half_spread_bps": 0.29
+  },
+  "GOOGL": {
+   "ask": 353.46,
+   "bid": 353.43,
+   "half_spread_bps": 0.424
+  },
+  "INTC": {
+   "ask": 101.4,
+   "bid": 101.39,
+   "half_spread_bps": 0.493
+  },
+  "IWM": {
+   "ask": 277.95,
+   "bid": 277.94,
+   "half_spread_bps": 0.18
+  },
+  "JPM": {
+   "ask": 334.12,
+   "bid": 334.06,
+   "half_spread_bps": 0.898
+  },
+  "LLY": {
+   "ask": 1183.7,
+   "bid": 1183.31,
+   "half_spread_bps": 1.648
+  },
+  "META": {
+   "ask": 742.83,
+   "bid": 742.72,
+   "half_spread_bps": 0.74
+  },
+  "MSFT": {
+   "ask": 539.76,
+   "bid": 539.72,
+   "half_spread_bps": 0.371
+  },
+  "MU": {
+   "ask": 990.85,
+   "bid": 990.72,
+   "half_spread_bps": 0.656
+  },
+  "NFLX": {
+   "ask": 70.79,
+   "bid": 70.78,
+   "half_spread_bps": 0.706
+  },
+  "NVDA": {
+   "ask": 226.77,
+   "bid": 226.75,
+   "half_spread_bps": 0.441
+  },
+  "ORCL": {
+   "ask": 137.35,
+   "bid": 137.32,
+   "half_spread_bps": 1.092
+  },
+  "PLTR": {
+   "ask": 207.71,
+   "bid": 207.66,
+   "half_spread_bps": 1.204
+  },
+  "QQQ": {
+   "ask": 746.16,
+   "bid": 746.15,
+   "half_spread_bps": 0.067
+  },
+  "SMH": {
+   "ask": 591.7,
+   "bid": 591.62,
+   "half_spread_bps": 0.676
+  },
+  "SPY": {
+   "ask": 777.83,
+   "bid": 777.82,
+   "half_spread_bps": 0.064
+  },
+  "TSLA": {
+   "ask": 378.15,
+   "bid": 378.11,
+   "half_spread_bps": 0.529
+  },
+  "UBER": {
+   "ask": 71.5,
+   "bid": 71.49,
+   "half_spread_bps": 0.699
+  },
+  "UNH": {
+   "ask": 378.05,
+   "bid": 377.95,
+   "half_spread_bps": 1.323
+  },
+  "XLE": {
+   "ask": 65.96,
+   "bid": 65.95,
+   "half_spread_bps": 0.758
+  },
+  "XLF": {
+   "ask": 54.99,
+   "bid": 54.98,
+   "half_spread_bps": 0.909
+  },
+  "XLK": {
+   "ask": 196.3,
+   "bid": 196.29,
+   "half_spread_bps": 0.255
+  },
+  "XOM": {
+   "ask": 172.03,
+   "bid": 172.01,
+   "half_spread_bps": 0.581
+  }
+ },
+ "source": "Robinhood get_equity_quotes NBBO, single snapshot"
+}

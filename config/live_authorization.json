@@ -1,0 +1,8 @@
+{
+ "phrase": "i-authorize-live-trading",
+ "account": "agentic (agentic_allowed account only)",
+ "granted": "2026-10-12",
+ "by": "account owner, in conversation",
+ "statement": "you can do up to 10% of my balance for every trade ... No need for paper trading ... Make this agentic trader ready to trade after this last updates. I will add money into the account on wednesday",
+ "scope": "Orders only for strategies with a VALIDATED verdict, through scripts.live and the CLAUDE.md runbook, within src/risk/limits.py. Revoke by deleting this file or creating KILL_SWITCH."
+}

@@ -188,10 +188,10 @@ def propose(verdict=None, **over):
 
 
 def test_valid_proposal_carries_researched_statistics():
-    p = propose()
-    assert p.shares == 125 and p.risk_dollars == 125.0
+    p = propose()                       # $25k equity, 10% cap → $2,500 at $100
+    assert p.shares == 25 and p.risk_dollars == 25.0
     assert p.sample_size == 150 and p.oos_win_rate == 0.42
-    assert p.expectancy_dollars == pytest.approx(15.0) and p.risk_reward == 2.0
+    assert p.expectancy_dollars == pytest.approx(3.0) and p.risk_reward == 2.0
     out = p.render()
     for field in ("Historical sample", "OOS win rate", "Expectancy after costs",
                   "Reasons to reject", "Regime", "Holdout"):

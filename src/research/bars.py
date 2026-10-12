@@ -166,6 +166,32 @@ def to_sessions(bars: list[Bar], symbol: str, interval: str,
     return sessions, excluded
 
 
+# NYSE 1:00 PM closes. Full-day holidays need no entry: no bars exist for them.
+# Update annually from the NYSE calendar.
+EARLY_CLOSES = {date(2026, 11, 27), date(2026, 12, 24), date(2027, 11, 26)}
+
+
+def scheduled_close(d: date) -> datetime:
+    return datetime.combine(d, EARLY_CLOSE if d in EARLY_CLOSES else RTH_CLOSE, ET)
+
+
+def live_session(bars: list[Bar], symbol: str, interval: str, day: date,
+                 now: datetime) -> Session | None:
+    """Today's session so far: only bars that have fully closed by `now`.
+
+    Returns None unless the bars start at the open and have no gaps — a live
+    signal computed on holey data would not match the backtest.
+    """
+    step = timedelta(minutes=INTRADAY_MINUTES[interval])
+    today = [b for b in bars if b.et.date() == day and b.ts + step <= now]
+    if not today or today[0].et.time() != RTH_OPEN:
+        return None
+    for a, b in zip(today, today[1:]):
+        if b.ts - a.ts != step:
+            return None
+    return Session(symbol, day, today, scheduled_close(day))
+
+
 class BarStore:
     """Gzipped CSV per symbol and interval. Deterministic bytes, so hashes are stable."""
 

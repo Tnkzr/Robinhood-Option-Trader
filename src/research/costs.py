@@ -25,6 +25,25 @@ class CostModel:
     taf_cap: float = 8.30
     overrides_bps: dict[str, float] = field(default_factory=dict)
 
+    @classmethod
+    def calibrated(cls, snapshot_path: str = "research/spreads/2026-10-12.json",
+                   open_multiplier: float = 2.0, **kw) -> "CostModel":
+        """Defaults, raised per symbol to `open_multiplier` × a measured half spread.
+
+        The multiplier covers spreads near the open being wider than the
+        late-session snapshot. Measurements only ever raise costs, never lower them.
+        """
+        import json
+        base = cls(**kw)
+        quotes = json.loads(open(snapshot_path).read())["quotes"]
+        over = {}
+        for sym, q in quotes.items():
+            default = base.index_half_spread_bps if sym in INDEX_ETFS else base.half_spread_bps
+            measured = open_multiplier * q["half_spread_bps"]
+            if measured > default:
+                over[sym] = round(measured, 3)
+        return replace(base, overrides_bps={**over, **base.overrides_bps})
+
     def stressed(self, mult: float) -> "CostModel":
         return replace(self, half_spread_bps=self.half_spread_bps * mult,
                        index_half_spread_bps=self.index_half_spread_bps * mult,
@@ -32,11 +51,13 @@ class CostModel:
                        stop_extra_bps=self.stop_extra_bps * mult,
                        overrides_bps={k: v * mult for k, v in self.overrides_bps.items()})
 
+    def half_spread_for(self, symbol: str) -> float:
+        return self.overrides_bps.get(symbol, self.index_half_spread_bps
+                                      if symbol in INDEX_ETFS else self.half_spread_bps)
+
     def _bps(self, symbol: str, stop: bool) -> float:
-        hs = self.overrides_bps.get(symbol,
-                                    self.index_half_spread_bps if symbol in INDEX_ETFS
-                                    else self.half_spread_bps)
-        return hs + self.slippage_bps + (self.stop_extra_bps if stop else 0.0)
+        return (self.half_spread_for(symbol) + self.slippage_bps
+                + (self.stop_extra_bps if stop else 0.0))
 
     def market_fill(self, symbol: str, price: float, side: int, stop: bool = False) -> float:
         """side=+1 buying, -1 selling. Always adverse to the trader."""

@@ -215,7 +215,74 @@ class VwapMeanReversion(Strategy):
         return None
 
 
+def long_only(base: type[Strategy]) -> type[Strategy]:
+    """The same rules, taking only the long side — the agentic account cannot
+    short shares, so only long-only results describe tradeable behaviour."""
+    class _LongOnly(base):  # type: ignore[valid-type, misc]
+        family = base.family + "_long"
+
+        def on_bar(self, c: BarContext) -> EntryIntent | None:
+            intent = super().on_bar(c)
+            return intent if intent is not None and intent.direction > 0 else None
+
+    _LongOnly.__name__ = _LongOnly.__qualname__ = base.__name__ + "Long"
+    return _LongOnly
+
+
+class OpeningRangeToClose(Strategy):
+    """5-minute opening range, held to the close (Zarattini & Aziz, 2023).
+
+    If the first 5-minute bar is bullish on elevated relative volume ("stock in
+    play"), buy at the second bar's open with the stop at the first bar's low
+    (or 10% of ATR); no profit target — exit at the stop or the session close.
+    Long side only.
+    """
+
+    family = "orb5_close"
+    DEFAULTS = {"rvol_min": 1.0, "stop": "bar_low"}
+    GRID = {"rvol_min": [1.0, 2.0], "stop": ["bar_low", "atr10"]}
+
+    def on_bar(self, c: BarContext) -> EntryIntent | None:
+        if c.i != 0 or c.rvol is None or c.rvol < self.p["rvol_min"]:
+            return None
+        b = c.bar
+        if b.close <= b.open:
+            return None
+        stop = b.low if self.p["stop"] == "bar_low" else b.close - 0.10 * c.atr
+        return EntryIntent(1, stop, target_r=50.0, note="ORB5 to close")
+
+
+class LateDayMomentum(Strategy):
+    """Market intraday momentum (Gao, Han, Li & Zhou, JFE 2018).
+
+    The day's early return predicts its final stretch. At 15:00 ET, buy when the
+    first-half-hour (or open-to-now) return is positive by at least min_ret_atr
+    of daily ATR; exit at the 15:45 flatten or the stop. Long side only.
+    """
+
+    family = "late_momentum"
+    DEFAULTS = {"signal": "first30", "min_ret_atr": 0.0, "stop_atr": 0.25, "check_min": 330}
+    GRID = {"signal": ["first30", "day"], "min_ret_atr": [0.0, 0.25],
+            "stop_atr": [0.25, 0.5]}
+
+    def on_bar(self, c: BarContext) -> EntryIntent | None:
+        if c.minutes_since_open != self.p["check_min"] or c.i < 6:
+            return None
+        o = c.bars[0].open
+        ref = c.bars[5].close if self.p["signal"] == "first30" else c.bar.close
+        if ref - o <= self.p["min_ret_atr"] * c.atr:
+            return None
+        return EntryIntent(1, c.bar.close - self.p["stop_atr"] * c.atr, target_r=50.0,
+                           note=f"late momentum ({self.p['signal']})")
+
+
+BOTH_SIDES = (OpeningRangeBreakout, VwapPullback, MomentumContinuation, VwapMeanReversion)
+
 FAMILIES: dict[str, type[Strategy]] = {
     cls.family: cls for cls in
-    (OpeningRangeBreakout, VwapPullback, MomentumContinuation, VwapMeanReversion)
+    (*BOTH_SIDES, *(long_only(c) for c in BOTH_SIDES), OpeningRangeToClose, LateDayMomentum)
 }
+
+# Families the account can actually trade (no short selling).
+LONG_ONLY_FAMILIES = [f for f, cls in FAMILIES.items()
+                      if f.endswith("_long") or cls in (OpeningRangeToClose, LateDayMomentum)]

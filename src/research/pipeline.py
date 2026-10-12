@@ -70,6 +70,7 @@ class FamilyResult:
     holdout: list[date]
     portfolio: PortfolioResult | None
     grid_size: int
+    limits: RiskLimits | None = None
 
 
 def research_family(ds: Dataset, family: str, *, costs: CostModel, crit: EdgeCriteria,
@@ -99,7 +100,7 @@ def research_family(ds: Dataset, family: str, *, costs: CostModel, crit: EdgeCri
         "stressed_expectancy_r": verdict.stressed_expectancy_r,
         "status": verdict.status.value, "reasons": list(verdict.reasons),
         "families_tested": fams})
-    return FamilyResult(family, verdict, wf, dev, holdout, pf, len(grid))
+    return FamilyResult(family, verdict, wf, dev, holdout, pf, len(grid), limits)
 
 
 def evaluate_holdout(ds: Dataset, fr: FamilyResult, *, costs: CostModel, crit: EdgeCriteria,
@@ -162,8 +163,12 @@ def render(fr: FamilyResult, ds: Dataset) -> str:
     if fr.portfolio:
         p = fr.portfolio
         rej = ", ".join(f"{k}: {n}" for k, n in sorted(p.rejection_counts().items())) or "none"
-        lines += ["", f"Portfolio replay on OOS (0.5% risk/trade, 2% daily stop, 3-loss halt, "
-                      f"${p.starting_equity:,.0f} start): {len(p.accepted)} filled, "
+        L = fr.limits or RiskLimits()
+        lines += ["", f"Portfolio replay on OOS ({L.max_position_pct:.0%} capital / "
+                      f"{L.risk_per_trade_pct:.0%} risk cap per trade, "
+                      f"{L.max_daily_loss_pct:.0%} daily stop, {L.max_consecutive_losses}-loss halt, "
+                      f"{L.max_positions} positions, ${p.starting_equity:,.0f} start): "
+                      f"{len(p.accepted)} filled, "
                       f"{len(p.rejected)} blocked ({rej}); return {p.total_return:+.2%}, "
                       f"max drawdown {p.max_drawdown_pct:.2%}."]
     if v.holdout:

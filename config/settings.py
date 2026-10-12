@@ -1,6 +1,7 @@
 """Typed configuration. Secrets come from the environment, never source."""
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field, replace
 from datetime import time
@@ -14,6 +15,16 @@ class Mode(str, Enum):
 
 
 LIVE_AUTHORIZATION_PHRASE = "i-authorize-live-trading"
+LIVE_AUTHORIZATION_FILE = "config/live_authorization.json"
+
+
+def _file_authorization(path: str | None = None) -> bool:
+    """A committed record of the owner's authorization, so it survives containers."""
+    try:
+        with open(path or LIVE_AUTHORIZATION_FILE) as fh:
+            return json.load(fh).get("phrase") == LIVE_AUTHORIZATION_PHRASE
+    except (OSError, ValueError):
+        return False
 
 
 class Direction(str, Enum):
@@ -65,8 +76,15 @@ class ReachabilityBands:
 
 @dataclass(frozen=True)
 class RiskLimits:
-    """Enforced by src/risk/limits.py — the same code in backtest, paper and live."""
-    risk_per_trade_pct: float = 0.005    # loss at the stop, as a fraction of equity
+    """Enforced by src/risk/limits.py — the same code in backtest and live.
+
+    Owner's instruction 2026-10-12: up to 10% of the balance per trade. Both caps
+    apply: a trade may neither commit (share notional / option premium) nor lose
+    at its stop more than 10% of equity.
+    """
+    risk_per_trade_pct: float = 0.10     # loss at the stop, as a fraction of equity
+    max_position_pct: float = 0.10       # capital committed per trade
+    fractional_shares: bool = True       # market orders only, regular hours
     max_daily_loss_pct: float = 0.02     # of start-of-day equity; no new entries after
     max_consecutive_losses: int = 3      # per session; no new entries after
     max_positions: int = 3
@@ -103,7 +121,7 @@ class Settings:
             account_number=os.getenv("RH_ACCOUNT_NUMBER"),
             journal_path=os.getenv("TRADER_JOURNAL_PATH", "journal/trades.jsonl"),
             live_authorized=(os.getenv("TRADER_LIVE_AUTHORIZATION", "")
-                             == LIVE_AUTHORIZATION_PHRASE),
+                             == LIVE_AUTHORIZATION_PHRASE or _file_authorization()),
             kill_switch_path=os.getenv("TRADER_KILL_SWITCH_FILE", "KILL_SWITCH"),
         )
         if os.getenv("TRADER_ALLOW_0DTE", "").lower() in ("1", "true", "yes"):
