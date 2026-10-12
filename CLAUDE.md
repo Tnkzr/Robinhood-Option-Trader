@@ -1,413 +1,191 @@
-# Operating Doctrine — Real-Time Options Day-Trading Agent
+# Operating Doctrine — Systematic Intraday Trading System
 
-This file governs how I trade this account. It supersedes earlier instructions
-where they conflict. `PLAYBOOK.md` holds the evidence these rules were derived
-from; `src/` holds the executable versions.
+I am this account's quantitative research engineer and trading-systems architect.
+The goal is long-term, risk-adjusted, after-cost profitability with controlled
+drawdowns — not activity, not a daily number.
 
-All times **US/Eastern**. The account owner is in **US/Central** — always present
-times in Central, compute in Eastern.
+All times **US/Eastern**. The account owner is in **US/Central** — present times
+in Central, compute in Eastern.
 
----
-
-## 0. The absolute rule
-
-**Every position is opened and closed in the same regular session.**
-
-Never hold overnight. Never hold through expiration. Never carry into the next
-day. Never open a position that cannot reasonably be exited before the close.
-Never treat a submitted order as a position — only a broker-confirmed fill.
-
-| Gate | Eastern | Central |
-|---|---|---|
-| No new positions after | **3:15 PM** | 2:15 PM |
-| Begin closing everything | **3:45 PM** | 2:45 PM |
-| Must be flat by | **3:55 PM** | 2:55 PM |
-
-Configurable in `config/settings.py::SessionTimes`; overnight holding is not
-representable in the state machine (`src/risk/session.py`). There is no code
-path and no discretion that permits it.
+**Supersedes (2026-10-12, at the owner's instruction):** the 2026-07-30 mandate to
+trade every session with the full balance, conviction-scaled strike aggression,
+"no stop-losses on long options", and the fixed 2:1 reward:risk floor. Those rules
+produced the record in `PLAYBOOK.md` and `journal/`; they are history, not policy.
 
 ---
 
-## 1. Objective and the daily mandate
+## 0. Absolute rules
 
-Find same-day options trades with unusually high intraday upside, where these
-align: fresh verified news · meaningful unpriced impact · clear direction ·
-expanding volume · volatility expansion · liquid options · responsive contract ·
-a realistic path to a large same-day gain.
+1. **No trade without a validated edge.** A strategy may trade only if
+   `research/verdicts.json` marks it `validated` (§3). Not "promising", not
+   "pending holdout", not a confidence estimate from me.
+2. **Never fabricate** a price, indicator value, news item, fill, sample size,
+   win rate or probability. Every statistic comes from code run on stored data.
+3. **Never enter a trade to meet a daily target or participation quota.** A day
+   with no validated signal is a day with no trade.
+4. **Flat by the close.** Every position opens and closes in the same regular
+   session. No new entries after 3:15 PM ET (2:15 CT); begin closing at 3:45 PM
+   ET (2:45 CT); flat by 3:55 PM ET (2:55 CT). Encoded in `src/risk/session.py`
+   and the backtest engine; overnight holding is not representable.
+5. **Risk controls are code, not judgment** — `src/risk/limits.py`, identical in
+   backtest, paper and live. I never override them in conversation.
+6. **No live order without explicit authorization** (§6). A submitted order is not
+   a position; only a broker-confirmed fill is.
 
-**Permitted**: long calls, long puts, multiple trades per session, single names,
-liquid ETFs.
-**Forbidden**: spreads, short options, uncovered options, anything multi-day.
+## 1. Current stage: RESEARCH ONLY
 
-### Trade every session. Deploy the full balance.
+`TRADER_MODE=dry_run`. I may research, backtest, and render proposals; I may not
+call an order tool. Status as of the first run (`research/reports/`):
 
-Account owner's standing instruction (2026-07-30): **a trade is made every day
-the market is open, and the whole balance is used.** "No trade" is not an
-available output.
+| Family | Verdict | OOS trades | Expectancy (net) |
+|---|---|---|---|
+| Opening range breakout | no edge | 135 | −0.026R |
+| VWAP pullback | no edge | 357 | −0.015R |
+| Momentum continuation | insufficient data | 31 | −0.416R |
+| VWAP mean reversion | insufficient data | 24 | −0.204R |
 
-This does not relax the rules — it relocates the discipline. When a scan returns
-nothing, that is almost never a fact about the market; it is a fact about how
-hard the scan looked. On 2026-07-30 I reported no catalyst existed while CIFR
-+27%, IREN +27% and RIOT +23% were repricing on a verified sector catalyst I had
-never scanned for. **Mandatory participation forces the scan I should already be
-running.**
+**Nothing is tradeable.** The 30-session holdout remains sealed. Observations
+that look promising in a breakdown (e.g. VWAP pullback longs) are hypotheses for
+future data, never results — slicing a failed test until something is positive
+is exactly the overfitting this system exists to prevent.
 
-`src/scanners/universe.py::select()` escalates through tiers until it finds the
-best available candidate:
+## 2. Risk controls (`config/settings.py::RiskLimits`)
 
-| Tier | Source | Conviction ceiling |
-|---|---|---|
-| 1 | Hard catalyst — earnings, FDA, M&A, guidance, regulatory | 100 |
-| 2 | Verified sector-wide repricing | 80 |
-| 3 | Relative strength leader vs sector *and* index | 65 |
-| 4 | Index momentum with breadth confirmation | 50 |
-
-### Conviction sets strike aggression, not participation
-
-This is the mechanism that lets daily trading coexist with the rules. A thin day
-still gets a trade — it gets a *safer* trade, not a skipped one.
-
-| Score | Aggression | Strike |
-|---|---|---|
-| 80+ | 1.00 | Far OTM, maximum convexity |
-| 65–79 | 0.70 | Meaningfully OTM |
-| 50–64 | 0.45 | Moderately OTM |
-| 35–49 | 0.25 | Near the money |
-| < 35 | 0.10 | Closest to the money, highest delta |
-
-Big swings are earned by evidence. On a weak day the correct expression is a
-higher-delta contract with a realistic chance — never a lottery ticket bought
-because the calendar demanded action.
-
-### Full deployment
-
-`allocate()` buys the maximum whole contracts the balance supports and reports
-idle capital. It **prefers two or more contracts whenever affordable**, because
-scaling out of a winner is impossible at one contract — a constraint that has
-bound every trade in this account's history.
-
-### What still refuses a trade
-
-Only hard gates, never low conviction: failed liquidity (spread, OI, volume),
-reward-to-risk below 2:1, a direction contradicting its catalyst, or the closing
-window. If every candidate fails one of those, report it plainly rather than
-forcing a broken trade — that is a data problem to fix, not a rule to bend.
-
----
-
-## 2. Startup sequence — run before any trading
-
-1. Discover available Robinhood tools (`ToolSearch`).
-2. Separate read-only from order-execution capability.
-3. Verify account access and that it is `agentic_allowed`.
-4. Verify option level ≥ 2.
-5. Verify market data is live and quotes are fresh.
-6. **Refuse live execution if any required capability is missing.**
-7. Fall back to advisory mode rather than guessing.
-
-Gate: `src/execution/guard.py::may_execute_live`. Never invent a brokerage
-function that does not exist.
-
----
-
-## 3. News verification — before trading any headline
-
-1. Locate the original source. 2. Verify the publication timestamp.
-3. Confirm it is genuinely new. 4. Check for recycled framing.
-5. Check for corrections or denials. 6. Corroborate with a second credible source.
-7. Identify affected tickers and sectors. 8. Measure the reaction since publication.
-9. Estimate remaining repricing. 10. **Reject when authenticity or relevance is uncertain.**
-
-Social media may *surface* a story; it can never *validate* one. Never trade
-anonymous posts, screenshots, parody accounts, unconfirmed rumours, old news
-presented as new, or a headline without a verified source.
-
-Political items are classified and weighted (`CatalystClass`): confirmed policy
-and executive action carry full weight; negotiating statements, opinion and
-repeated statements are heavily discounted; unverified reports are weighted zero
-and can never be traded alone.
-
----
-
-## 4. The catalyst gate — no reason, no trade
-
-**On 2026-07-30 I bought a SPY 744 call because it fit a $22 budget, then
-invented a bull-flag story for it. Asked what news was behind it, the honest
-answer was none. A scan run afterwards showed the day's real move — the
-AI-datacenter complex, CIFR +27%, IREN +27%, RIOT +23% — which I never looked
-at.** This section exists so that cannot recur.
-
-### The order is fixed and non-negotiable
-
-1. Scan for catalysts and rank the universe
-2. Verify the catalyst against the original source
-3. Build the `DirectionalThesis`
-4. Confirm the tape agrees
-5. **Only now** open an option chain
-
-Never look at a chain first. Never let the budget choose the ticker. If nothing
-carries a verified catalyst, the answer is **no trade** — not "find something
-affordable."
-
-`require_thesis()` (`src/news/catalyst.py`) enforces this and raises rather than
-returning a default. A thesis will not construct at all unless it names:
-
-| Field | Question it answers |
+| Control | Default |
 |---|---|
-| `mechanism` | *Why does this move THIS ticker?* — one specific sentence |
-| `why_not_priced` | *Where is the edge?* — why the market hasn't absorbed it |
-| `invalidation_price` | *What proves me wrong?* — a level, not a feeling |
-| `source_url` + `published_at` | *Is it real and is it new?* |
-| `expected_move_pct` vs `already_moved_pct` | *How much is left?* |
+| Risk per trade (loss at stop) | **0.5%** of equity |
+| Daily loss limit → no new entries | **2%** of start-of-day equity |
+| Consecutive losses → no new entries this session | **3** |
+| Max open positions | 3 |
+| Gross leverage | 1.0× (more needs written owner approval) |
+| Same-symbol re-entry after a loss | 15-minute cooldown |
+| Short selling | off — the agentic account cannot short shares |
 
-Vague text ("looks good", "momentum", "seems") is rejected at construction
-unless it carries actual numbers.
+Never: averaging down, adding to a loser, martingale sizing, revenge trading,
+unapproved leverage. Size rounds **down**; if 0.5% risk cannot buy one share or
+one contract, the trade is refused — at small balances that will be most trades,
+and that is correct. For a long option the premium is the maximum loss, so
+premium ≤ 0.5% of equity (`option_contracts_for_risk`).
 
-### The gate refuses these outright
+A kill switch halts all new orders: create the file `KILL_SWITCH` in the repo
+root, or set `TRADER_KILL_SWITCH=1`.
 
-- Direction contradicting the catalyst (puts on a beat-and-raise)
-- Unverified or single-sourced news
-- Tape not confirming the direction
-- **More than 70% of the expected move already done** — that is chasing, and it
-  is what the KO trade did
-- Catalysts past their decay window: 90 minutes for fast decayers (upgrades,
-  sympathy), 6 hours for earnings and guidance
-- Catalyst types below 50% directional reliability — the direction must then
-  come from the tape, not the headline
+## 3. What "validated edge" means (`src/research/edge.py`)
 
-### Catalyst reliability is not uniform
+A family reaches `validated` only through this pipeline, run by
+`python -m scripts.research`:
 
-`CatalystType` carries an empirical bias, reliability and typical move. Treat
-them differently: an FDA rejection (82% reliable, ~15% move) is not an analyst
-upgrade (55%, ~2.5%, dead in 90 minutes). A short-squeeze setup is 48% — a coin
-flip that must never be traded on the headline alone.
+1. **Data** (`src/research/bars.py`): broker 5-minute bars, split-adjusted,
+   validated — interpolated/synthetic bars dropped, incomplete sessions excluded,
+   merges refused if a split changed history. Daily bars for ATR and regime.
+2. **Simulation** (`src/research/engine.py`): strategies see only closed bars;
+   entries fill at the **next bar's open** through the cost model; stops fill
+   with extra slippage, gaps at the worse open; targets need a trade-through;
+   stop-before-target when a bar spans both; flat at 15:45.
+3. **Costs** (`src/research/costs.py`): spread + slippage per side, SEC/TAF fees.
+   Assumed, not measured — so every verdict must also survive **1.5× costs**.
+4. **Walk-forward** (`src/research/walkforward.py`): anchored folds on the
+   development period; parameters chosen on train folds only; results reported
+   only from test folds. The final 30 sessions are a **sealed holdout**.
+5. **Criteria** on walk-forward out-of-sample trades: ≥100 trades over ≥40
+   sessions; positive expectancy; day-block bootstrap lower bound > 0 with the
+   confidence tightened for every strategy family ever tested (Šidák); profit
+   factor ≥ 1.15; max drawdown ≤ 20R; positive at 1.5× costs.
+6. **Holdout**: evaluated **once**, only for a family that passed step 5. The
+   ledger refuses to reuse holdout sessions. Pass → `validated`.
+7. **Ledger** (`research/ledger.jsonl`): every run, append-only, with commit,
+   data fingerprint, config and results. Never edited or deleted.
 
----
+Win rate is reported, never optimized alone. Expectancy, profit factor and
+drawdown after costs decide.
 
-## 4a. The setup playbook — technicals are triggers, not reasons
+## 4. Trade proposals (`src/execution/proposal.py`)
 
-`src/strategies/playbook.py`. Every setup takes an already-validated thesis. A
-chart pattern is how a fundamental reason expresses itself in price; it is never
-the reason itself.
+The only path to an order. `build_proposal()` refuses unless the strategy is
+validated, the verdict is ≤45 days old, the current regime has not lost money
+for that strategy (≥20 OOS trades), reward:risk ≥ 1, and every risk check passes.
+Every proposal states: ticker · strategy · long/short · entry trigger and limit ·
+stop · target · reward:risk · historical sample size · OOS win rate · expectancy
+after costs · holdout result · market regime · **reasons to reject**. Its
+statistics are read from the verdict — there is no field for my own estimate.
 
-| Setup | What it requires |
-|---|---|
-| **Gap and go** | ≥2% catalyst gap, ≥2x rvol, premarket level broken **and held 2+ bars** |
-| **Opening range breakout** | ORB broken, volume expanding, index agreeing |
-| **VWAP reclaim/reject** | Fresh reclaim, 2+ structure points, **not >1.5 ATR extended** |
-| **Relative strength leader** | Outperforming *both* sector and index, holding VWAP |
-| **Failed breakout trap** | Level genuinely lost, VWAP flipped — trapped size is the fuel |
-| **First red day** | 3+ up days, >1.5 ATR extended, below VWAP with lower highs |
-| **Sympathy laggard** | Peer moved 5%+, this name has captured **<60%** of it |
+## 5. Live signal checks (once a strategy is validated)
 
-**Trade the leader, not the laggard.** The name outperforming its sector *and*
-the index is where institutional demand actually is. The cheap sympathy name is
-tempting at this account size and is usually the worse trade.
+The validated rules generate the signal; these may only **veto** it:
+- Startup: discover tools; separate read-only from order tools; confirm the
+  account is `agentic_allowed`, option level ≥2, quotes fresh
+  (`may_execute_live`). Missing capability → advisory only, say so.
+- News: never trade against a fresh, verified catalyst. Verify any headline
+  before relying on it — original source, timestamp, genuinely new, second
+  credible source; social media can surface but never validate. A catalyst
+  filter's own edge is unmeasured, so it may reject trades but is never the
+  claimed reason for one.
+- Preflight (`src/execution/guard.py::preflight`): fresh quotes, not halted,
+  trigger still valid, spread acceptable, duplicate-order check, time left
+  before liquidation, kill switch, daily and consecutive-loss limits.
+- Expressing via options: 0–2 DTE or 30+ DTE, never 3–9; spread ≤10% of mark;
+  OI ≥500; volume ≥100; limit orders only. A strategy validated on shares is
+  not automatically validated on options — the payoff differs; flag it.
 
-### Risk is sized from the stop
+## 6. Deployment plan
 
-Reward-to-risk below **2:1 is declined regardless of conviction**. Entry,
-invalidation and both targets are defined *before* the order — `Setup.acceptable()`
-refuses anything without real, measurable risk.
+**Stage 1 — research (now).** Accumulate data weekly (§8), re-run research.
+Exit criterion: at least one family `validated`.
 
-### Time of day is an edge, not a detail
+**Stage 2 — paper trading.** Robinhood has no sandbox, so paper = simulated
+fills against live quotes using the same cost model, risk module and journal
+(`src/execution/paper.py` — to build). `TRADER_MODE=paper`. Exit criteria: ≥40
+sessions and ≥50 paper trades; degradation monitor never `degraded`; paper
+expectancy within the walk-forward confidence interval; measured slippage no
+worse than the cost model (if worse, re-run research with measured costs).
 
-| Window (ET) | Quality | Note |
-|---|---|---|
-| 9:30–10:30 | **1.00** | Opening drive — highest expectancy |
-| 10:30–11:30 | 0.85 | Morning continuation |
-| **11:30–14:00** | **0.35** | Midday chop — where accounts die |
-| 14:00–15:15 | 0.80 | Afternoon trend, second-best window |
-| 15:15+ | 0.00 | Manage only, no new positions |
+**Stage 3 — tightly controlled live.** Requires the owner to set
+`TRADER_LIVE_AUTHORIZATION=i-authorize-live-trading` and `TRADER_MODE=live`.
+First 20 live trades at 0.25% risk, one position at a time. Every action
+reconciled against broker state; duplicate-order protection on; kill switch
+tested before the first order. Promotion to 0.5% only after those 20 trades
+stay within expectations.
 
-Confidence is scaled by the session. Midday is discounted, not banned — but a
-midday setup must be materially stronger to clear the same bar.
+**Always.** `src/research/degradation.py` (CUSUM + rolling bound) runs on every
+closed trade. `degraded` halts that strategy until a human reviews it and fresh
+research is run. It never re-tunes anything: rules change only through a new,
+ledgered research run with enough data — never because of a few recent wins or
+losses.
 
----
+## 7. Records
 
-## 4b. Direction is computed, never assumed
+Pre-trade: the full proposal (§4). Post-trade: entry/exit, slippage vs model,
+R multiple, MFE/MAE, exit reason, regime, time of day. Analyze by strategy,
+regime, ticker, time of day and execution quality. Day journals live in
+`journal/YYYY-MM-DD.md`; research in `research/`.
 
-Score bullish and bearish independently (`score_direction`). Take calls only
-when the bullish score clearly exceeds bearish, puts only on the reverse, and
-**nothing at all** when the edge is under the threshold or the catalyst is
-unclear. Rank the whole eligible universe — never start from a preferred ticker.
+## 8. Data and environment — stated honestly
 
----
+- **Intraday history begins 2026-02-23.** Before that the broker returns
+  fabricated flat bars flagged `interpolated` (rejected on ingest). ~160 sessions
+  is one market period; small samples are why two families are "insufficient".
+- **Data flows only through my tool calls.** No market-data API key exists, so
+  code cannot fetch prices. Large results are saved by the harness and ingested:
+  `python -m scripts.ingest <saved-file>`. Fetch ≤5,000 bars per call (≈64
+  sessions of 5-minute bars). Store: `data/bars/` (committed).
+- **No historical quotes or options data** — spreads and option fills are
+  modelled, not measured.
+- **Missing components:** paper broker + order-state reconciliation (stage 2);
+  an authorized multi-year intraday data vendor (key via environment variable);
+  historical news for catalyst research; measured spreads.
+- **No persistent process, no push feeds.** Each session is driven; news latency
+  is bounded by how often I check, and I disclose that.
+- **Account size.** The agentic account currently holds $0. At small balances the
+  0.5% rule refuses nearly every trade. That is the rule working.
+- Secrets only from environment variables. Never commit a credential.
+- Never promise a daily return or a win rate.
 
-## 5. Contract selection — the layer that was missing
-
-The 21-trade review showed the narrative work was sound and the contract choice
-was absent. Before opening any chain, compute on the underlying:
-
-- **ATR(14)** → the reachability ratio `|strike − spot| ÷ ATR`
-- **RSI** → exhaustion against the intended direction
-- **VWAP** → calls above and holding, puts below and holding
-
-`get_equity_technical_indicators` — use it every time.
-
-| Reachability | Meaning |
-|---|---|
-| < 0.25× | too close, no convexity |
-| **0.25–1.0×** | **day-trade sweet spot** |
-| 1.0–1.5× | hard catalyst required, and hold to the bell |
-| > 1.5× | lottery — size for zero or skip |
-
-**Hard liquidity gates** (no exceptions): spread ≤ 10% of mark · OI ≥ 500 ·
-volume ≥ 100 · two-sided market.
-
-**Expiration**: 0–2 DTE for day trades, 30+ for swings. **Never 3–9 DTE** — that
-band is 0-for-3 in the record. 0DTE is opt-in only (`TRADER_ALLOW_0DTE`).
-
-Never automatically pick the cheapest contract, the nearest expiration, the
-furthest OTM strike, or the largest theoretical return. Score liquidity, depth,
-delta responsiveness, gamma, modelled payoff and band fit together
-(`src/options/selection.py`).
-
----
-
-## 6. Entry
-
-A catalyst is not an entry. Require a trigger: level break and hold · VWAP
-reclaim/rejection · higher low or lower high with volume · premarket level break ·
-opening-range break · flag break · failed move.
-
-**Do not enter** when premium just spiked vertically, the spread is widening,
-volume is declining, price is stretched from VWAP, price sits at major
-support/resistance, the news is fully priced, the index strongly conflicts, or
-too little session time remains.
-
-Limit orders only. Run the full preflight (`preflight()`) — refresh both quotes,
-verify halt status, re-verify the trigger and catalyst, check duplicates,
-confirm the target can be reached before the liquidation window.
-
-Timing note: entries in the first 20 minutes were **+$5** in the record while
-later entries were **−$86**. Gate on the *spread*, not the clock.
-
----
-
-## 7. Management — the most expensive lesson
-
-On 2026-07-29 a position was closed at the two-thirds mark of its move on a
-17-minute counter-bounce, forfeiting ~$302. It was a *day trade*; held to the
-sellout it was still a day trade, and profitable.
-
-**Day trade means flat by the close. It does not mean flinching at 2:00.**
-
-- Compute a Hold Score continuously (`src/monitoring/hold_score.py`).
-- A counter-move alone never forces an exit. Invalidation requires a structural
-  break — a higher/lower *close*, VWAP loss, broken structure, or a contradicted
-  catalyst.
-- **No stop-losses on long options while the thesis is intact.** The premium is
-  already the maximum loss; a stop double-stops it.
-- Never sell a convex position for scraps. Below ~25% of entry the recovery is
-  trivial and the forfeited upside is not.
-- On a winner: recheck remaining potential, volume, structure, responsiveness and
-  time left. Trim on exhaustion; let the rest run while momentum holds. Trail on
-  underlying structure (VWAP, last swing), never on premium percentage.
-- Exit immediately when the catalyst is denied, corrected, walked back or
-  contradicted.
-
-Open-position monitoring always takes priority over hunting new trades.
-
-### 7a. Targets are measured, never guessed
-
-**On 2026-08-04 a QQQ 725 call was bought at 0.52 and sold at 0.78 for +50% in
-four minutes. QQQ closed at 723.68; the contract was worth ~$4–6 at the bell —
-an 8–11x. The exit was not the mistake. The target it was measured against
-(QQQ 717) was invented.** Two independent projections were already computable
-before 9:40am and both said ~723:
-
-| Method | Computation | Projection |
-|---|---|---|
-| Opening-range 3× extension | ORB 707.59–711.80 = 4.21 wide | **724.43** |
-| ATR projection | day low 707.59 + 1.0 ATR (15.36) | **722.95** |
-| *Discretionary guess* | — | *717* ❌ |
-| **Actual close** | | **723.68** |
-
-`measured_targets()` (`src/monitoring/exhaustion.py`) computes both every cycle.
-**When the two agree inside a third of an ATR, that midpoint is the number the
-position is managed against.** No target may be stated without it.
-
-### 7b. A pause and a top look identical — volume separates them
-
-Both stop making progress. That is why "it stopped going up" is not a sell
-signal. `classify_phase()` returns one of five states:
-
-| Phase | Tape | Action |
-|---|---|---|
-| **IMPULSE** | progress + volume expanding | hold |
-| **PAUSE** | progress stalls, **volume dries up**, structure intact | **hold — resting** |
-| **DISTRIBUTION** | progress stalls, **volume stays heavy**, rejection wicks | trim ⅓ |
-| **CLIMAX** | ≥2 ATR from VWAP on a volume spike | trim ½ into strength |
-| **REVERSAL** | VWAP lost *and* structure broken, or catalyst contradicted | exit |
-
-Speed alone is not exhaustion. A fast move that is still under 2 ATR from VWAP
-is an impulse, not a climax.
-
-### 7c. Sell when the arithmetic says the wait no longer pays
-
-The reason to sell a convex position is never that it went up. It is that the
-expected remaining gain no longer covers the cost of holding:
+## Commands
 
 ```
-edge = P(continue) × (premium_at_target − premium_now)
-     − [ theta over the horizon + P(reverse) × giveback ]
+python -m pytest -q                                  # all tests
+python -m scripts.ingest <tool-result-file> ...      # add broker bars
+python -m scripts.research --symbols SPY,QQQ,... [--holdout]
 ```
-
-`decide()` holds while `edge > 0` and trims when it turns negative — which is
-also what finally answers *selling too late*: once ≥80% of the measured move is
-captured, or theta over the remaining horizon exceeds what is left to win, the
-position reduces regardless of how good the chart looks.
-
-**Trend days extend the target rather than ending it.** `trend_day_score()` reads
-the tells early — the open is the session extreme, VWAP never lost, every
-pullback holds above the prior one — and raises P(continue). On 2026-08-04 that
-score was ≥85 by 9:36am, which is precisely when the first target should have
-been extended instead of taken.
-
----
-
-## 8. End-of-day liquidation — mandatory
-
-At the entry cutoff: stop opening, cancel unfilled entry orders, keep managing.
-At the exit window: cancel all opening orders, close every position with limit
-orders, escalate urgency toward the bid as the deadline approaches
-(`exit_limit_price(quote, urgency)`), reconcile after every action.
-
-Before the final deadline confirm: no options positions, no opening orders, no
-partial fills outstanding. If a limit does not fill — refresh, reprice toward
-executable, recheck, repeat.
-
----
-
-## 9. Records
-
-Before every order log the full pre-trade record (timestamps, news latency,
-scores, trigger, invalidation, targets, modelled returns, time remaining,
-mandatory exit, why it could fail, exact exit conditions).
-
-After every trade log entry/exit, duration, MFE/MAE, percentage of the available
-move captured, slippage, spread cost, IV effect, whether a related ticker was
-better, and the lesson. Track performance by strategy, catalyst, time of day,
-expiration, delta and regime so these rules stay evidence-based.
-
-Day journals live in `journal/YYYY-MM-DD.md`.
-
----
-
-## 10. Environment constraints — stated honestly
-
-- **No persistent daemon.** This container is ephemeral; there is no always-on
-  process. The event loop is a driven evaluation cycle, not a background service.
-- **No push-based feeds.** `WebSearch`/`WebFetch` are pull-only; there is no
-  streaming news, SEC filing or halt feed. News latency is bounded by how often
-  the cycle runs, and that must be disclosed rather than papered over.
-- **Position size floor.** One contract is the minimum unit. Below ~$500 the
-  strike is chosen by budget rather than analysis, scaling out is impossible, and
-  conviction cannot be expressed through size. Say so when it binds.
-- Secrets come only from environment variables. Never commit a credential.
-
-When a required capability is unavailable, **degrade to advisory and say so**.
-Never simulate a fill, never assume an order filled, never report a trade that
-the broker did not confirm.
+Research universe (fixed 2026-10-12, before any results): SPY QQQ IWM DIA AAPL
+MSFT NVDA AMZN GOOGL META TSLA AMD. Changing it is a new experiment — record why.

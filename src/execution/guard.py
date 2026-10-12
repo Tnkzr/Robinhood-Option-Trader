@@ -93,11 +93,18 @@ def preflight(
     account_value: float,
     open_positions: int,
     daily_pnl_pct: float,
+    consecutive_losses: int,
+    kill_switch: bool,
     dup: str | None,
 ) -> GateResult:
-    """Every gate from the spec's order-execution checklist, in one place."""
+    """Every gate from the order-execution checklist, in one place.
+
+    `cost` is the most the position can lose (the premium, for a long option).
+    """
     f: list[str] = []
 
+    if kill_switch:
+        f.append("kill switch engaged")
     if session.phase.value in ("premarket", "closed"):
         f.append(f"market not open (phase={session.phase.value})")
     if not session.may_open:
@@ -123,11 +130,15 @@ def preflight(
     r: RiskLimits = settings.risk
     if open_positions >= r.max_positions:
         f.append(f"at position limit ({open_positions}/{r.max_positions})")
-    if account_value > 0 and cost / account_value > r.max_pct_of_account_per_trade:
-        f.append(f"size {cost/account_value:.0%} exceeds "
-                 f"{r.max_pct_of_account_per_trade:.0%} cap")
+    if account_value <= 0:
+        f.append("no account equity")
+    elif cost / account_value > r.risk_per_trade_pct + 1e-9:
+        f.append(f"max loss {cost/account_value:.2%} of equity exceeds "
+                 f"{r.risk_per_trade_pct:.2%} risk cap")
     if daily_pnl_pct <= -r.max_daily_loss_pct:
-        f.append(f"daily loss limit hit ({daily_pnl_pct:.0%})")
+        f.append(f"daily loss limit hit ({daily_pnl_pct:.1%})")
+    if consecutive_losses >= r.max_consecutive_losses:
+        f.append(f"{consecutive_losses} consecutive losses — no new entries this session")
 
     return GateResult(passed=not f, failures=f)
 
@@ -145,12 +156,15 @@ def exit_limit_price(q: Quote, urgency: float) -> float:
 
 
 def may_execute_live(settings: Settings, capabilities: set[str]) -> tuple[bool, str]:
-    """Refuse live execution unless every required capability is present."""
+    """Refuse live execution unless explicitly authorized and fully capable."""
     required = {"get_accounts", "get_portfolio", "get_option_positions",
                 "get_option_quotes", "place_option_order", "get_option_orders",
                 "cancel_option_order"}
     if settings.mode is not Mode.LIVE:
         return False, f"mode is {settings.mode.value}; no live orders"
+    if not settings.live_authorized:
+        return False, ("live execution not authorized — the account owner must set "
+                       "TRADER_LIVE_AUTHORIZATION")
     missing = required - capabilities
     if missing:
         return False, f"missing brokerage capabilities: {sorted(missing)} — fall back to advisory"

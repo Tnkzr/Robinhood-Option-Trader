@@ -8,9 +8,12 @@ from enum import Enum
 
 
 class Mode(str, Enum):
-    DRY_RUN = "dry_run"      # evaluate only, never call an order tool
-    PAPER = "paper"          # simulate fills, persist to journal
-    LIVE = "live"            # real orders, requires capability verification
+    DRY_RUN = "dry_run"      # research only — never call an order tool
+    PAPER = "paper"          # simulate fills against live quotes, persist to journal
+    LIVE = "live"            # real orders: needs capabilities AND explicit authorization
+
+
+LIVE_AUTHORIZATION_PHRASE = "i-authorize-live-trading"
 
 
 class Direction(str, Enum):
@@ -62,10 +65,14 @@ class ReachabilityBands:
 
 @dataclass(frozen=True)
 class RiskLimits:
+    """Enforced by src/risk/limits.py — the same code in backtest, paper and live."""
+    risk_per_trade_pct: float = 0.005    # loss at the stop, as a fraction of equity
+    max_daily_loss_pct: float = 0.02     # of start-of-day equity; no new entries after
+    max_consecutive_losses: int = 3      # per session; no new entries after
     max_positions: int = 3
-    max_pct_of_account_per_trade: float = 0.35
-    max_daily_loss_pct: float = 0.25     # halt trading for the day
-    size_assumes_total_loss: bool = True
+    max_gross_leverage: float = 1.0      # notional / equity; >1 needs explicit approval
+    allow_short: bool = False            # account must support it; off until verified
+    cooldown_after_loss_min: float = 15.0  # same-symbol re-entry block after a loss
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,8 @@ class Settings:
     expiration: ExpirationPolicy = field(default_factory=ExpirationPolicy)
     account_number: str | None = None
     journal_path: str = "journal/trades.jsonl"
+    live_authorized: bool = False
+    kill_switch_path: str = "KILL_SWITCH"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -93,6 +102,9 @@ class Settings:
             mode=Mode(os.getenv("TRADER_MODE", "dry_run")),
             account_number=os.getenv("RH_ACCOUNT_NUMBER"),
             journal_path=os.getenv("TRADER_JOURNAL_PATH", "journal/trades.jsonl"),
+            live_authorized=(os.getenv("TRADER_LIVE_AUTHORIZATION", "")
+                             == LIVE_AUTHORIZATION_PHRASE),
+            kill_switch_path=os.getenv("TRADER_KILL_SWITCH_FILE", "KILL_SWITCH"),
         )
         if os.getenv("TRADER_ALLOW_0DTE", "").lower() in ("1", "true", "yes"):
             s = replace(s, expiration=replace(s.expiration, allow_0dte=True))

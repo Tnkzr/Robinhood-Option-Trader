@@ -175,8 +175,9 @@ def base_preflight(**over):
     kw = dict(settings=Settings(), session=SessionClock().state(at(11, 0)),
               stock_quote=fresh(), option_quote=fresh(), is_halted=False,
               trigger_still_valid=True, catalyst_still_valid=True,
-              minutes_needed=30.0, cost=50.0, account_value=1000.0,
-              open_positions=0, daily_pnl_pct=0.0, dup=None)
+              minutes_needed=30.0, cost=5.0, account_value=1000.0,
+              open_positions=0, daily_pnl_pct=0.0, consecutive_losses=0,
+              kill_switch=False, dup=None)
     kw.update(over)
     return preflight(**kw)
 
@@ -195,7 +196,11 @@ def test_preflight_happy_path():
     ({"session": SessionClock().state(at(15, 30))}, "entry window closed"),
     ({"open_positions": 9}, "position limit"),
     ({"cost": 900.0}, "exceeds"),
-    ({"daily_pnl_pct": -0.9}, "daily loss limit"),
+    ({"cost": 5.01}, "risk cap"),
+    ({"daily_pnl_pct": -0.02}, "daily loss limit"),
+    ({"consecutive_losses": 3}, "consecutive losses"),
+    ({"kill_switch": True}, "kill switch"),
+    ({"account_value": 0.0}, "no account equity"),
     ({"dup": "duplicate order blocked: x"}, "duplicate"),
 ])
 def test_preflight_blocks(over, fragment):
@@ -227,17 +232,33 @@ def test_exit_limit_walks_to_bid_with_urgency():
     assert exit_limit_price(q, 1.0) == 1.00
 
 
+FULL_CAPS = {"get_accounts", "get_portfolio", "get_option_positions",
+             "get_option_quotes", "place_option_order", "get_option_orders",
+             "cancel_option_order"}
+
+
 def test_live_execution_refused_without_capabilities():
-    s = Settings(mode=Mode.LIVE, account_number="X")
+    s = Settings(mode=Mode.LIVE, account_number="X", live_authorized=True)
     ok, why = may_execute_live(s, {"get_accounts"})
     assert not ok and "missing brokerage capabilities" in why
+    assert may_execute_live(s, FULL_CAPS)[0]
+    assert not may_execute_live(Settings(mode=Mode.DRY_RUN), FULL_CAPS)[0]
+    assert not may_execute_live(Settings(mode=Mode.LIVE, live_authorized=True),
+                                FULL_CAPS)[0]  # no account
 
-    full = {"get_accounts", "get_portfolio", "get_option_positions",
-            "get_option_quotes", "place_option_order", "get_option_orders",
-            "cancel_option_order"}
-    assert may_execute_live(s, full)[0]
-    assert not may_execute_live(Settings(mode=Mode.DRY_RUN), full)[0]
-    assert not may_execute_live(Settings(mode=Mode.LIVE), full)[0]  # no account
+
+def test_live_execution_requires_explicit_authorization():
+    s = Settings(mode=Mode.LIVE, account_number="X")
+    ok, why = may_execute_live(s, FULL_CAPS)
+    assert not ok and "not authorized" in why
+
+
+def test_authorization_comes_only_from_exact_phrase(monkeypatch):
+    monkeypatch.setenv("TRADER_MODE", "live")
+    monkeypatch.setenv("TRADER_LIVE_AUTHORIZATION", "yes")
+    assert not Settings.from_env().live_authorized
+    monkeypatch.setenv("TRADER_LIVE_AUTHORIZATION", "i-authorize-live-trading")
+    assert Settings.from_env().live_authorized
 
 
 # --------------------------- hold score -------------------------------------

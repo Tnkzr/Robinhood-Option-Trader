@@ -164,7 +164,7 @@ def classify_tier(t: CatalystType) -> Tier:
 
 
 # --------------------------------------------------------------------------
-# Full-balance deployment
+# Risk-capped deployment
 # --------------------------------------------------------------------------
 
 @dataclass
@@ -177,38 +177,35 @@ class Allocation:
     warning: str | None = None
 
 
-def allocate(balance: float, per_contract_cost: float,
-             prefer_scaling: bool = True) -> Allocation:
-    """Deploy as much of the balance as whole contracts allow.
+def allocate(balance: float, per_contract_cost: float, max_loss: float) -> Allocation:
+    """Whole contracts whose total premium stays within `max_loss`.
 
-    Prefers >=2 contracts when affordable so a winner can be scaled — taking
-    half off and letting the rest run is impossible at one contract, which has
-    constrained every trade in this account's history.
+    `max_loss` is the per-trade risk budget from src/risk/limits.py (0.5% of
+    equity by default). The full balance is never the budget: a long option's
+    premium is its maximum loss, so premium spent is risk taken.
     """
     if per_contract_cost <= 0:
         return Allocation(0, 0.0, 0.0, balance, False, "invalid contract cost")
-
-    n = int(balance // per_contract_cost)
+    budget = min(balance, max_loss)
+    n = int(budget // per_contract_cost)
     if n <= 0:
         return Allocation(0, per_contract_cost, 0.0, balance, False,
-                          f"cannot afford one contract at ${per_contract_cost:.2f}")
-
+                          f"one contract at ${per_contract_cost:.2f} exceeds the "
+                          f"${budget:.2f} risk budget")
     total = n * per_contract_cost
-    unused = balance - total
     warn = None
     if n == 1:
         warn = ("single contract — no ability to scale out of a winner; "
                 "exit is all-or-nothing")
-    if unused > per_contract_cost * 0.9:
-        warn = f"${unused:.2f} idle — nearly enough for another contract"
-
-    return Allocation(n, per_contract_cost, round(total, 2), round(unused, 2),
+    return Allocation(n, per_contract_cost, round(total, 2), round(balance - total, 2),
                       can_scale_out=n >= 2, warning=warn)
 
 
 def best_contract_cost_for_balance(balance: float, candidates_costs: list[float],
                                    prefer_scaling: bool = True) -> float | None:
-    """Pick the per-contract cost that deploys the most capital.
+    """Pick the per-contract cost that uses the most of `balance`.
+
+    Pass the per-trade risk budget as `balance`, never the account balance.
 
     Ties break toward the option allowing >=2 contracts, so scaling out stays
     available.

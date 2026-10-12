@@ -1,4 +1,4 @@
-"""Tests for daily-participation selection and full-balance deployment."""
+"""Tests for candidate selection and risk-capped deployment."""
 from __future__ import annotations
 
 import sys
@@ -136,36 +136,34 @@ def test_midday_scores_below_open_for_identical_setup():
     assert c.score(dtime(12, 30)) < c.score(dtime(9, 45))
 
 
-# --------------------------- full-balance use -------------------------------
+# --------------------------- risk-capped use -------------------------------
 
-def test_deploys_maximum_whole_contracts():
-    a = allocate(251.0, 1.12)
-    assert a.contracts == 224
-    assert a.total_cost == pytest.approx(250.88)
-    assert a.unused < 1.12
+def test_allocation_is_capped_by_risk_budget_not_balance():
+    a = allocate(10_000.0, 1.12, max_loss=50.0)
+    assert a.contracts == 44
+    assert a.total_cost <= 50.0
 
 
 def test_flags_single_contract_as_unable_to_scale():
-    a = allocate(115.0, 112.0)
+    a = allocate(25_000.0, 112.0, max_loss=125.0)
     assert a.contracts == 1
     assert not a.can_scale_out
     assert "scale out" in a.warning
 
 
 def test_two_contracts_enables_scaling():
-    a = allocate(251.0, 110.0)
+    a = allocate(50_000.0, 110.0, max_loss=250.0)
     assert a.contracts == 2 and a.can_scale_out
 
 
-def test_unaffordable_contract_reported_not_crashed():
-    a = allocate(22.0, 112.0)
-    assert a.contracts == 0 and "cannot afford" in a.warning
+def test_contract_above_risk_budget_is_refused():
+    a = allocate(5_000.0, 112.0, max_loss=25.0)
+    assert a.contracts == 0 and "risk budget" in a.warning
 
 
-def test_flags_meaningful_idle_capital():
-    a = allocate(219.0, 110.0)
-    assert a.contracts == 1
-    assert "idle" in a.warning
+def test_small_balance_still_binds():
+    a = allocate(22.0, 10.0, max_loss=100.0)
+    assert a.contracts == 2
 
 
 def test_best_cost_maximises_deployment():
