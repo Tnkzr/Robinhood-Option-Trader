@@ -264,3 +264,12 @@ def test_fractional_proposal_at_fifty_dollars():
                 stop_price=775.5, target_price=781.3)
     assert 0 < p.shares < 1 and p.shares * p.limit_price == pytest.approx(5.0, abs=0.01)
     assert "$5.00" in p.render()
+
+
+def test_freshness_is_measured_from_the_newest_data_seen():
+    old_dev = validated(data_end="2026-08-27")
+    with pytest.raises(ProposalRejected):
+        propose(verdict=old_dev, at=datetime(2026, 10, 14, 14, tzinfo=timezone.utc))
+    p = propose(verdict=validated(data_end="2026-08-27", data_through="2026-10-09"),
+                at=datetime(2026, 10, 14, 14, tzinfo=timezone.utc))
+    assert p.shares > 0

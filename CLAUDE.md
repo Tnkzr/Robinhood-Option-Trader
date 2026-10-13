@@ -146,7 +146,8 @@ note it in one line and stop.
    and at `postclose_utc` → "AUTONOMOUS: step D — post-close".
 5. `send_later` at `next_cycle_utc` → "AUTONOMOUS: step B — trading cycle"
    (cycles always run: provisional signals and the daily minimum need them).
-   Skip only if the kill switch is set and the journal has no open positions.
+   Skip only if the journal has no open positions and either the kill switch is
+   set or equity is $0 (nothing can be sized) — say so in one line.
 
 **B. Trading cycle (every 5 minutes, ~1 min after each bar closes)**
 1. **First** `send_later` the next cycle at `next_cycle_utc` (if not null), so a

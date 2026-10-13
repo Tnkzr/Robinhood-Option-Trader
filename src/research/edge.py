@@ -56,6 +56,11 @@ class EdgeVerdict:
     data_end: str
     families_tested: int
     criteria: dict = field(default_factory=dict)
+    data_through: str | None = None   # newest session in the dataset at research time
+
+    @property
+    def fresh_as_of(self) -> str:
+        return self.data_through or self.data_end
 
     @property
     def tradeable(self) -> bool:
@@ -81,12 +86,13 @@ def adjusted_alpha(alpha: float, families: int) -> float:
 
 def judge_walk_forward(family: str, wf: WFResult, stressed_oos: Sequence[Trade],
                        families_tested: int, crit: EdgeCriteria, run_id: str,
-                       data_start: str, data_end: str) -> EdgeVerdict:
+                       data_start: str, data_end: str,
+                       data_through: str | None = None) -> EdgeVerdict:
     oos = wf.oos_trades
     s = summarize(oos)
     base = dict(strategy=family, params=wf.final_key, holdout=None, run_id=run_id,
                 data_start=data_start, data_end=data_end, families_tested=families_tested,
-                criteria=asdict(crit))
+                criteria=asdict(crit), data_through=data_through)
     if s is None or s.n < crit.min_oos_trades or s.sessions < crit.min_oos_sessions \
             or wf.final_key is None:
         n = s.n if s else 0

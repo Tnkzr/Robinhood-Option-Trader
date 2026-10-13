@@ -135,9 +135,9 @@ def build_proposal(*, ticker: str, strategy: str, params: str, direction: int,
             fails.append("only the quota_fill rule may fill the daily minimum")
     elif tier_of(v, policy) != tier:
         fails.append(f"{strategy} is {v.status.value}, not {tier}: {'; '.join(v.reasons)}")
-    age = (at.date() - date.fromisoformat(v.data_end)).days
+    age = (at.date() - date.fromisoformat(v.fresh_as_of)).days
     if age > max_verdict_age_days:
-        fails.append(f"verdict data ends {v.data_end} ({age}d old) — re-run research")
+        fails.append(f"research data ends {v.fresh_as_of} ({age}d old) — re-run research")
     rg = v.by_regime.get(regime or "unknown")
     if tier != "quota_fill" and rg and rg["n"] >= min_regime_trades and rg["expectancy_r"] <= 0:
         fails.append(f"{strategy} lost money in regime {regime} "

@@ -111,6 +111,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -136,7 +137,7 @@
       "max drawdown 42.0R > 20.0R",
       "expectancy -0.058R at 1.5x costs is not positive"
     ],
-    "run_id": "20261012T194535Z-f6f6fd",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "no_edge",
     "strategy": "late_momentum",
     "stressed_expectancy_r": -0.058115763565525114
@@ -154,6 +155,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": null,
     "families_tested": 4,
     "holdout": null,
     "oos": {
@@ -193,6 +195,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -214,7 +217,7 @@
     "reasons": [
       "41 OOS trades over 20 sessions; need 100 over 40"
     ],
-    "run_id": "20261012T194535Z-f6f6fd",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "insufficient_data",
     "strategy": "mean_reversion_long",
     "stressed_expectancy_r": null
@@ -232,6 +235,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": null,
     "families_tested": 4,
     "holdout": null,
     "oos": {
@@ -271,6 +275,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -292,7 +297,7 @@
     "reasons": [
       "89 OOS trades over 47 sessions; need 100 over 40"
     ],
-    "run_id": "20261012T194535Z-f6f6fd",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "insufficient_data",
     "strategy": "momentum_long",
     "stressed_expectancy_r": null
@@ -395,6 +400,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": null,
     "families_tested": 4,
     "holdout": null,
     "oos": {
@@ -522,6 +528,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -546,7 +553,7 @@
       "profit factor 1.00 < 1.15",
       "expectancy -0.040R at 1.5x costs is not positive"
     ],
-    "run_id": "20261012T194535Z-f6f6fd",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "no_edge",
     "strategy": "orb5_close",
     "stressed_expectancy_r": -0.04044693277534924
@@ -635,6 +642,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -656,7 +664,7 @@
     "reasons": [
       "bootstrap lower bound -0.097R \u2264 0 at \u03b1=0.0051 (10 families tested)"
     ],
-    "run_id": "20261012T194917Z-0a9c4e",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "no_edge",
     "strategy": "orb_long",
     "stressed_expectancy_r": 0.05793740718518113
@@ -759,6 +767,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-04-21",
+    "data_through": "2026-10-09",
     "families_tested": 1,
     "holdout": null,
     "oos": {
@@ -780,7 +789,7 @@
     "reasons": [
       "quota fill \u2014 measured, not an edge claim"
     ],
-    "run_id": "20261013T001354Z-944cec",
+    "run_id": "20261013T002752Z-e6a71e",
     "status": "no_edge",
     "strategy": "quota_fill",
     "stressed_expectancy_r": -0.3061170823160182
@@ -897,6 +906,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": null,
     "families_tested": 4,
     "holdout": null,
     "oos": {
@@ -1038,6 +1048,7 @@
     },
     "data_end": "2026-08-27",
     "data_start": "2026-02-23",
+    "data_through": "2026-10-09",
     "families_tested": 10,
     "holdout": null,
     "oos": {
@@ -1062,7 +1073,7 @@
       "max drawdown 33.8R > 20.0R",
       "expectancy -0.000R at 1.5x costs is not positive"
     ],
-    "run_id": "20261012T194535Z-f6f6fd",
+    "run_id": "20261013T002430Z-5e2b5f",
     "status": "no_edge",
     "strategy": "vwap_pullback_long",
     "stressed_expectancy_r": -0.0003149272032666198

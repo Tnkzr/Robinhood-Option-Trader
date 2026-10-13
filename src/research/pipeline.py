@@ -86,7 +86,8 @@ def research_family(ds: Dataset, family: str, *, costs: CostModel, crit: EdgeCri
                     for t in stressed[key] if t.session in set(f.test)]
     fams = ledger.families_tested(including=run_families)
     verdict = judge_walk_forward(family, wf, stressed_oos, fams, crit, run_id,
-                                 str(dev[0]) if dev else "", str(dev[-1]) if dev else "")
+                                 str(dev[0]) if dev else "", str(dev[-1]) if dev else "",
+                                 data_through=str(ds.calendar[-1]))
     pf = run_portfolio(wf.oos_trades, limits, equity, costs) if wf.oos_trades else None
     ledger.append({
         "kind": "walk_forward", "run_id": run_id, "family": family, "data": ds.fingerprint,

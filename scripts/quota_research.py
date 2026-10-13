@@ -65,7 +65,8 @@ def main() -> int:
                                breakdown(taken_fills, lambda t: t.regime or "unknown").items()},
                     reasons=("quota fill — measured, not an edge claim",), run_id=run_id,
                     data_start=str(oos_days[0]), data_end=str(dev[-1]),
-                    families_tested=1, criteria=asdict(EdgeCriteria()))
+                    families_tested=1, criteria=asdict(EdgeCriteria()),
+                    data_through=str(ds.calendar[-1]))
     VerdictStore().save(v)
 
     def row(name, s):
