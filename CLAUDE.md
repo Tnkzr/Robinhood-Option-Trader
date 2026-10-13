@@ -16,13 +16,19 @@ produced the record in `PLAYBOOK.md` and `journal/`; they are history, not polic
 
 ## 0. Absolute rules
 
-1. **No trade without a validated edge.** A strategy may trade only if
-   `research/verdicts.json` marks it `validated` (§3). Not "promising", not
-   "pending holdout", not a confidence estimate from me.
+1. **Every trade comes from a measured rule, never from my judgment.** Tiers, in
+   priority order (§4): *validated* (passed §3), *provisional* (failed §3 but
+   positive out-of-sample expectancy after costs over ≥100 trades), and
+   *quota fill* (tops the day up to the owner's minimum). Each order states its
+   tier and its measured record. I never present a provisional or fill trade as
+   a validated edge.
 2. **Never fabricate** a price, indicator value, news item, fill, sample size,
    win rate or probability. Every statistic comes from code run on stored data.
-3. **Never enter a trade to meet a daily target or a participation quota.** A day
-   with no validated signal is a day with no trade.
+3. **Daily minimum: 8 trades** (owner, 2026-10-13: "a minimum of 8 trades per
+   day … multiple trades going at the same time"). Natural signals first; at
+   13:30 ET (12:30 CT) the shortfall is filled by `quota_fill`. The minimum never
+   overrides the daily loss limit, the kill switch, the position cap or the
+   entry cutoff — on such days fewer than 8 is correct.
 4. **Flat by the close.** No new entries after 3:15 PM ET (2:15 CT); begin closing
    at 3:45 PM ET (2:45 CT); flat by 3:55 PM ET (2:55 CT). Same rule in the engine.
 5. **Risk controls are code, not judgment** — `src/risk/limits.py`, identical in
@@ -31,25 +37,26 @@ produced the record in `PLAYBOOK.md` and `journal/`; they are history, not polic
 
 ## 1. Status
 
-**Live trading: authorized** (`config/live_authorization.json`, 2026-10-12, the
-owner: "up to 10% of my balance for every trade … no need for paper trading …
-make this agentic trader ready to trade"). Revoke by deleting that file or
-creating `KILL_SWITCH`.
+**Live trading: authorized** (`config/live_authorization.json`, 2026-10-12).
+Revoke by deleting that file or creating `KILL_SWITCH`.
 
-**Validated strategies: none.** Research run 2026-10-12 (30 symbols, 160 sessions,
-calibrated costs; `research/reports/`):
+**Validated strategies: none.** Long-only results, 30 symbols, 160 sessions,
+calibrated costs (`research/reports/`):
 
-| Long-only family | OOS trades | Net expectancy | Verdict |
+| Family | OOS trades | Net expectancy | Tier |
 |---|---|---|---|
-| Opening range breakout | 199 | +0.073R | no edge — CI lower bound −0.097R |
-| VWAP pullback | 535 | +0.030R | no edge — PF 1.08, DD 33.8R |
-| ORB-5 to close (Zarattini & Aziz 2023) | 181 | 0.000R | no edge |
-| Late-day momentum (Gao et al. 2018) | 1,000 | −0.040R | no edge |
-| Momentum continuation | 89 | −0.214R | insufficient data |
-| VWAP mean reversion | 41 | −0.192R | insufficient data |
+| Opening range breakout (long) | 199 | +0.073R | provisional |
+| VWAP pullback (long) | 535 | +0.030R | provisional |
+| ORB-5 to close · late-day momentum | 181 · 1,000 | 0.000R · −0.040R | not traded |
+| Momentum · VWAP mean reversion (long) | 89 · 41 | −0.214R · −0.192R | not traded |
 
-Until something validates, `scripts.live scan` returns no entries and that is the
-correct output. The holdout (last 30 sessions) has never been opened.
+**Daily-minimum system** (`scripts.quota_research`, 90 OOS sessions, trades the
+replay accepted under live limits): natural signals +0.026R (CI −0.089…+0.146),
+quota fills **−0.271R** (CI −0.356…−0.186 — reliably losing), whole system
+**−0.084R** (CI −0.170…+0.004); 8+ trades on 90/90 days; at $50: −4.1%
+(−$2.06), max drawdown 7.7%. The minimum is the owner's choice and it costs
+expected return; report that plainly whenever results are discussed. The
+holdout (last 30 sessions) has never been opened.
 
 ## 2. Risk controls (`config/settings.py::RiskLimits`)
 
@@ -58,8 +65,9 @@ correct output. The holdout (last 30 sessions) has never been opened.
 | Capital committed per trade (share notional / option premium) | **≤ 10%** of equity |
 | Loss at the stop per trade | **≤ 10%** of equity |
 | Daily loss → no new entries | 2% of start-of-day equity |
-| Consecutive losses → no new entries this session | 3 |
-| Max open positions | 3 |
+| Daily minimum trades (owner, 2026-10-13) | 8 — fills at 13:30 ET |
+| Consecutive-loss halt | off — it would contradict the daily minimum |
+| Max open positions | 8 |
 | Gross leverage | 1.0× |
 | Same-symbol re-entry after a loss | 15-minute cooldown |
 | Short selling | off — the agentic account cannot short shares |
@@ -103,14 +111,17 @@ Never lower a criterion to make something pass, and never slice a failed result
 gets into production. A slice can only become a *new* family, tested on data it
 has not seen, and counted in the ledger.
 
-## 4. Trade proposals (`src/execution/proposal.py`)
+## 4. Trade proposals (`src/execution/proposal.py`, `src/execution/quota.py`)
 
-The only path to an order. Refused unless the strategy is validated, the verdict
-is ≤45 days old, its OOS record in the current regime is not negative (≥20
-trades), reward:risk ≥ 1, and every risk check passes. Each states ticker ·
-strategy · direction · trigger · limit · stop · target · reward:risk · sample
-size · OOS win rate · expectancy after costs · holdout · regime · reasons to
-reject. Its statistics come from the verdict; there is no field for my estimate.
+The only path to an order. Every proposal carries a **tier** — validated,
+provisional, or quota fill — derived from stored verdicts by code
+(`tier_of`); a proposal cannot claim a tier its verdict doesn't support. Refused
+unless the verdict is ≤45 days old, every risk check passes, and (except quota
+fills) its OOS record in the current regime is not negative and reward:risk ≥ 1.
+Each states tier · ticker · strategy · direction · trigger · limit · stop ·
+target · reward:risk · sample size · OOS win rate · expectancy after costs ·
+holdout · regime · reasons to reject. Statistics come from the verdict; there is
+no field for my estimate.
 
 ## 5. Autonomous daily schedule (agentic account only)
 
@@ -133,9 +144,9 @@ note it in one line and stop.
    bars for `config/universe.py` (≤10 symbols per call) and `scripts.ingest`.
 4. `send_later` at `eod_safety_utc` → "AUTONOMOUS: step C — end-of-day flatten",
    and at `postclose_utc` → "AUTONOMOUS: step D — post-close".
-5. If a strategy is validated **or** the journal has open positions:
-   `send_later` at `next_cycle_utc` → "AUTONOMOUS: step B — trading cycle".
-   Otherwise no intraday cycles are needed — say so in one line.
+5. `send_later` at `next_cycle_utc` → "AUTONOMOUS: step B — trading cycle"
+   (cycles always run: provisional signals and the daily minimum need them).
+   Skip only if the kill switch is set and the journal has no open positions.
 
 **B. Trading cycle (every 5 minutes, ~1 min after each bar closes)**
 1. **First** `send_later` the next cycle at `next_cycle_utc` (if not null), so a
@@ -168,8 +179,9 @@ journal may remain. If anything does, sell again and `send_later` a re-check at
 1. Fetch the full session's `5minute` and `day` bars for the universe; ingest.
 2. If any trade happened: write `journal/YYYY-MM-DD.md` (trades, slippage vs
    model, R, exit reasons, degradation status).
-3. If `last_session_of_week`: `python -m scripts.research --holdout`; report any
-   verdict change in plain words.
+3. If `last_session_of_week`: `python -m scripts.research --holdout`, then
+   `python -m scripts.quota_research`; report any tier or verdict change, and the
+   daily-minimum system's live vs backtest expectancy, in plain words.
 4. Commit and push data, journal and research; end with a 2–4 line summary.
 
 **Failure handling.** A failed tool call never blocks steps C and D. If the
@@ -213,6 +225,7 @@ DTE (never 3–9), spread ≤10% of mark, OI ≥500, volume ≥100, limit orders
 python -m pytest -q
 python -m scripts.ingest <tool-result-file> ...
 python -m scripts.research [--holdout] [--families ...] [--symbols ...]
+python -m scripts.quota_research                    # daily-minimum system + quota_fill verdict
 python -m scripts.live calendar | scan --equity E | status --equity E | quote-ok SYM BID ASK
 python -m scripts.live record-entry '<signal json>' --fill F --shares N --order-id ID --entry-ts TS
 python -m scripts.live record-exit ENTRY_ID --fill F --reason stop|target|eod|manual --order-id ID --exit-ts TS

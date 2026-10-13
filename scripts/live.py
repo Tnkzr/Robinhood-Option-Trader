@@ -42,12 +42,14 @@ def cmd_scan(a) -> int:
              costs=CostModel.calibrated(), kill_switch=ks)
     out = {
         "now": r.now.isoformat(), "session": str(r.session), "validated": r.validated,
+        "signal_tiers": r.tiers, "entries_today_after_scan": r.entries_today, "quota": r.quota,
         "kill_switch": ks, "live_authorized": settings.live_authorized,
         "warnings": r.warnings, "halted": r.halted,
         "exits": [{"entry_id": x.entry.id, "symbol": x.entry.symbol, "side": "sell"
                    if x.entry.direction > 0 else "buy", "shares": x.entry.shares,
                    "reason": x.reason} for x in r.exits],
-        "entries": [{"signal": {**sig.__dict__, "signal_ts": sig.signal_ts.isoformat()},
+        "entries": [{"tier": p.tier,
+                     "signal": {**sig.__dict__, "signal_ts": sig.signal_ts.isoformat()},
                      "order": {"symbol": p.ticker, "side": "buy" if p.direction > 0
                                else "sell", "type": "market", "quantity": f"{p.shares:.6f}",
                                "market_hours": "regular_hours"},
@@ -86,8 +88,14 @@ def cmd_record_exit(a) -> int:
 
 def cmd_status(a) -> int:
     j = LiveJournal()
-    st = j.risk_state(_ts(a.now).date(), a.equity)
-    print(json.dumps({"start_equity": st.start_equity, "realized_today": st.realized_pnl,
+    d = _ts(a.now).date()
+    st = j.risk_state(d, a.equity)
+    from config.settings import QuotaPolicy
+    from src.execution.quota import signal_families
+    print(json.dumps({"trades_today": len([e for e in j.entries() if e.session == str(d)]),
+                      "daily_minimum": QuotaPolicy().min_trades_per_day,
+                      "signal_families": signal_families(VerdictStore().load(), QuotaPolicy()),
+                      "start_equity": st.start_equity, "realized_today": st.realized_pnl,
                       "consecutive_losses": st.consecutive_losses,
                       "open": [e.__dict__ for e in j.open_positions()],
                       "validated": [f for f, v in VerdictStore().load().items() if v.tradeable]},

@@ -172,7 +172,7 @@ def stale(bid=1.0, ask=1.05):
 
 
 def base_preflight(**over):
-    kw = dict(settings=Settings(), session=SessionClock().state(at(11, 0)),
+    kw = dict(settings=Settings(risk=RiskLimits(max_consecutive_losses=3)), session=SessionClock().state(at(11, 0)),
               stock_quote=fresh(), option_quote=fresh(), is_halted=False,
               trigger_still_valid=True, catalyst_still_valid=True,
               minutes_needed=30.0, cost=100.0, account_value=1000.0,

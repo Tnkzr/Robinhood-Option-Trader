@@ -16,9 +16,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from config.settings import RiskLimits
+from config.settings import QuotaPolicy, RiskLimits
 from src.execution.journal import LiveEntry, LiveJournal
 from src.execution.proposal import ProposalRejected, TradeProposal, build_proposal
+from src.execution.quota import FILL_FAMILY, signal_families
 from src.research.bars import (ET, INTRADAY_MINUTES, BarStore, live_session,
                                scheduled_close, to_sessions)
 from src.research.costs import TICK, CostModel
@@ -46,6 +47,7 @@ class EntrySignal:
     target_price: float | None
     note: str
     regime: str | None
+    score: float = 0.0
 
     def target_for(self, fill: float) -> float:
         """Same rule as the engine: R-multiple targets are measured from the fill."""
@@ -71,6 +73,9 @@ class ScanResult:
     exits: list[ExitSignal] = field(default_factory=list)
     halted: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    tiers: dict[str, str] = field(default_factory=dict)
+    quota: dict | None = None
+    entries_today: int = 0
 
 
 def strategy_for(family: str, key: str) -> Strategy:
@@ -119,12 +124,19 @@ def exit_for(entry: LiveEntry, sd: SymbolData | None, now: datetime) -> ExitSign
     return None
 
 
+REJECT_REASONS = ["spread wider than 2x the cost model at order time",
+                  "ask already at/through the stop or target (gap) — cancel",
+                  "halt, or fresh verified news contradicting the direction"]
+
+
 def scan(store: BarStore, verdicts: dict[str, EdgeVerdict], journal: LiveJournal, *,
          now: datetime, equity: float, symbols: list[str], limits: RiskLimits,
-         costs: CostModel, kill_switch: bool) -> ScanResult:
+         costs: CostModel, kill_switch: bool, policy: QuotaPolicy | None = None) -> ScanResult:
+    policy = policy or QuotaPolicy()
     day = now.astimezone(ET).date()
-    validated = sorted(f for f, v in verdicts.items() if v.tradeable)
-    res = ScanResult(now, day, validated)
+    fams = signal_families(verdicts, policy)
+    res = ScanResult(now, day, [f for f, t in fams if t == "validated"])
+    res.tiers = dict(fams)
     data, idx, regime, res.warnings = load_live(store, symbols, day, now)
 
     for e in journal.open_positions():
@@ -132,51 +144,77 @@ def scan(store: BarStore, verdicts: dict[str, EdgeVerdict], journal: LiveJournal
         if x:
             res.exits.append(x)
 
-    if not validated:
-        res.warnings.append("no strategy has a validated edge — no entries")
+    if not fams and policy.min_trades_per_day <= 0:
+        res.warnings.append("no eligible strategy — no entries")
         return res
     if now.astimezone(ET) >= scheduled_close(day) - timedelta(minutes=45):
         res.warnings.append("entry window closed")
         return res
 
     state: RiskState = journal.risk_state(day, equity)
-    for fam in validated:
+    traded_today = {e.symbol for e in journal.entries() if e.session == str(day)}
+    entries_today = len([e for e in journal.entries() if e.session == str(day)])
+
+    def propose(sig: EntrySignal, fam: str, tier: str) -> TradeProposal | None:
+        try:
+            p = build_proposal(
+                ticker=sig.symbol, strategy=fam, params=sig.params, direction=sig.direction,
+                entry_trigger=f"{sig.note} on the {sig.signal_ts.astimezone(ET):%H:%M} ET bar",
+                limit_price=sig.ref_price, stop_price=sig.stop,
+                target_price=sig.target_for(sig.ref_price), regime=sig.regime,
+                reasons_to_reject=REJECT_REASONS, verdicts=verdicts, state=state,
+                limits=limits, at=now, kill_switch=kill_switch, tier=tier, policy=policy)
+        except ProposalRejected as e:
+            res.rejected.append((sig, e.reasons))
+            return None
+        res.entries.append((sig, p))
+        state.open(OpenPosition(sig.symbol, p.direction, p.shares, p.limit_price, p.stop_price))
+        return p
+
+    def fresh_signal(fam: str, key: str, sym: str, sd: SymbolData) -> EntrySignal | None:
+        run = run_session(sd, len(sd.sessions) - 1, strategy_for(fam, key), costs,
+                          index_ctx=idx, regime=regime)
+        if run is None or run.pending is None:
+            return None
+        intent, sig_ts = run.pending
+        last = sd.sessions[-1].bars[-1]
+        if sig_ts != last.ts:
+            return None                        # stale: its entry bar already opened
+        return EntrySignal(fam, key, sym, intent.direction, sig_ts, last.close, intent.stop,
+                           intent.target_r, intent.target_price, intent.note, run.regime,
+                           intent.score)
+
+    for fam, tier in fams:
         v = verdicts[fam]
-        live_r = journal.closed_r(fam)
-        rep = degradation_check(v.oos["expectancy_r"], v.oos["std_r"], live_r)
+        rep = degradation_check(v.oos["expectancy_r"], v.oos["std_r"], journal.closed_r(fam))
         if rep.halt:
             res.halted[fam] = "; ".join(rep.reasons)
             continue
-        strat = strategy_for(fam, v.params)
         for sym, sd in sorted(data.items()):
-            run = run_session(sd, len(sd.sessions) - 1, strat, costs, index_ctx=idx,
-                              regime=regime)
-            if run is None or run.pending is None:
-                continue
-            intent, sig_ts = run.pending
-            last = sd.sessions[-1].bars[-1]
-            if sig_ts != last.ts:
-                continue                       # stale: its entry bar already opened
-            sig = EntrySignal(fam, v.params, sym, intent.direction, sig_ts, last.close,
-                              intent.stop, intent.target_r, intent.target_price,
-                              intent.note, run.regime)
-            try:
-                p = build_proposal(
-                    ticker=sym, strategy=fam, params=v.params, direction=intent.direction,
-                    entry_trigger=f"{intent.note} on the {sig_ts.astimezone(ET):%H:%M} ET bar",
-                    limit_price=last.close, stop_price=intent.stop,
-                    target_price=sig.target_for(last.close), regime=run.regime,
-                    reasons_to_reject=[
-                        "spread wider than 2x the cost model at order time",
-                        "ask already at/through the stop or target (gap) — cancel",
-                        "halt, or fresh verified news contradicting the direction"],
-                    verdicts=verdicts, state=state, limits=limits, at=now,
-                    kill_switch=kill_switch)
-            except ProposalRejected as e:
-                res.rejected.append((sig, e.reasons))
-                continue
-            res.entries.append((sig, p))
-            state.open(OpenPosition(sym, p.direction, p.shares, p.limit_price, p.stop_price))
+            sig = fresh_signal(fam, v.params, sym, sd)
+            if sig and propose(sig, fam, tier):
+                entries_today += 1
+                traded_today.add(sym)
+
+    fill_v = verdicts.get(FILL_FAMILY)
+    if policy.min_trades_per_day > entries_today:
+        cands = []
+        if fill_v is None:
+            res.warnings.append("quota_fill has no measured verdict — run scripts.quota_research")
+        else:
+            cands = [s for sym, sd in sorted(data.items())
+                     if (s := fresh_signal(FILL_FAMILY, fill_v.params, sym, sd))]
+        if cands:
+            res.quota = {"entries_before": entries_today, "minimum": policy.min_trades_per_day}
+            for c in sorted(cands, key=lambda c: (-c.score, c.symbol)):
+                if entries_today >= policy.min_trades_per_day:
+                    break
+                if c.symbol in traded_today or c.symbol in state.positions:
+                    continue
+                if propose(c, FILL_FAMILY, "quota_fill"):
+                    entries_today += 1
+                    traded_today.add(c.symbol)
+    res.entries_today = entries_today
     return res
 
 

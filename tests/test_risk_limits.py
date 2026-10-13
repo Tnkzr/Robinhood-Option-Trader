@@ -19,7 +19,8 @@ from src.risk.limits import (OpenPosition, RiskState, check_new_entry, kill_swit
 
 # Mechanics are tested under a tight, whole-share policy so the arithmetic is
 # easy to verify; the live defaults have their own tests below.
-L = RiskLimits(risk_per_trade_pct=0.005, max_position_pct=1.0, fractional_shares=False)
+L = RiskLimits(risk_per_trade_pct=0.005, max_position_pct=1.0, fractional_shares=False,
+               max_consecutive_losses=3, max_positions=3)
 LIVE = RiskLimits()
 D = date(2026, 6, 15)
 AT = datetime(2026, 6, 15, 15, 0, tzinfo=timezone.utc)
@@ -184,3 +185,25 @@ def test_replay_pnl_and_drawdown():
     assert [f.pnl for f in res.accepted] == [100.0, -50.0]
     assert res.final_equity == pytest.approx(10_050.0)
     assert res.max_drawdown_pct == pytest.approx(50.0 / 10_100)
+
+
+def test_live_policy_has_no_loss_streak_halt_but_keeps_daily_stop():
+    st = RiskState(session=D, start_equity=1_000, consecutive_losses=7)
+    ok = check_new_entry(st, symbol="XYZ", direction=1, entry=100.0, stop=99.0,
+                         risk_dollars=1.0, notional=100.0, limits=LIVE, at=AT)
+    assert ok
+    st.realized_pnl = -20.0
+    r = check_new_entry(st, symbol="XYZ", direction=1, entry=100.0, stop=99.0,
+                        risk_dollars=1.0, notional=98.0, limits=LIVE, at=AT)
+    assert not r and any("daily loss limit" in f for f in r.failures)
+
+
+def test_live_policy_allows_eight_concurrent_positions():
+    st = RiskState(session=D, start_equity=1_000)
+    for i in range(8):
+        assert check_new_entry(st, symbol=f"S{i}", direction=1, entry=100.0, stop=99.0,
+                               risk_dollars=1.0, notional=100.0, limits=LIVE, at=AT)
+        st.open(OpenPosition(f"S{i}", 1, 1.0, 100.0, 99.0))
+    r = check_new_entry(st, symbol="S9", direction=1, entry=100.0, stop=99.0,
+                        risk_dollars=1.0, notional=100.0, limits=LIVE, at=AT)
+    assert not r and any("position limit 8" in f for f in r.failures)

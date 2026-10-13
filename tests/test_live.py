@@ -97,12 +97,57 @@ def test_live_scan_reproduces_backtest_signals(market, family, tmp_path):
     assert live == rec.seen
 
 
-def test_no_validated_strategy_means_no_entries(market, tmp_path):
+def test_no_eligible_strategy_and_no_quota_means_no_entries(market, tmp_path):
+    from config.settings import QuotaPolicy
     st, days = market
     now = datetime.combine(days[-1], time(10, 0), ET).astimezone(timezone.utc)
     r = scan(st, {}, LiveJournal(tmp_path / "j.jsonl"), now=now, equity=1e4,
-             symbols=SYMS, limits=RiskLimits(), costs=COSTS, kill_switch=False)
-    assert r.entries == [] and any("no strategy has a validated edge" in w for w in r.warnings)
+             symbols=SYMS, limits=RiskLimits(), costs=COSTS, kill_switch=False,
+             policy=QuotaPolicy(min_trades_per_day=0))
+    assert r.entries == [] and any("no eligible strategy" in w for w in r.warnings)
+
+
+def fill_verdict(end: date) -> EdgeVerdict:
+    from src.research.strategies import QuotaFill
+    return EdgeVerdict(strategy="quota_fill", params=QuotaFill().key, status=Status.NO_EDGE,
+                       oos={"n": 293, "win_rate": 0.33, "expectancy_r": -0.27, "std_r": 1.0,
+                            "profit_factor": 0.36},
+                       oos_lower_bound=-0.36, stressed_expectancy_r=-0.31, holdout=None,
+                       by_regime={}, reasons=("measured",), run_id="t",
+                       data_start="2026-01-01", data_end=str(end), families_tested=1)
+
+
+def test_quota_fills_only_at_checkpoint_up_to_the_minimum(market, tmp_path):
+    from config.settings import QuotaPolicy
+    st, days = market
+    d = days[-1]
+    vs = {"quota_fill": fill_verdict(d)}
+    j = LiveJournal(tmp_path / "q.jsonl")
+    before = datetime.combine(d, time(13, 25, 30), ET).astimezone(timezone.utc)
+    assert scan(st, vs, j, now=before, equity=1e6, symbols=SYMS, limits=BIG, costs=COSTS,
+                kill_switch=False).entries == []
+    at = datetime.combine(d, time(13, 30, 30), ET).astimezone(timezone.utc)
+    r = scan(st, vs, j, now=at, equity=1e6, symbols=SYMS, limits=BIG, costs=COSTS,
+             kill_switch=False, policy=QuotaPolicy(min_trades_per_day=2))
+    assert len(r.entries) == 2 and all(p.tier == "quota_fill" for _, p in r.entries)
+    scores = [s.score for s, _ in r.entries]
+    assert scores == sorted(scores, reverse=True)
+    assert "NOT an edge" in r.entries[0][1].render()
+
+
+def test_quota_counts_todays_journal_entries(market, tmp_path):
+    from config.settings import QuotaPolicy
+    st, days = market
+    d = days[-1]
+    j = LiveJournal(tmp_path / "c.jsonl")
+    j.record_entry(session=d, symbol="AAA", strategy="orb_long", params="k", direction=1,
+                   signal_ts="x", entry_ts=datetime.combine(d, time(10), ET).isoformat(),
+                   fill=1.0, shares=1.0, stop=0.5, target=2.0, order_id="o")
+    at = datetime.combine(d, time(13, 30, 30), ET).astimezone(timezone.utc)
+    r = scan(st, {"quota_fill": fill_verdict(d)}, j, now=at, equity=1e6, symbols=SYMS,
+             limits=BIG, costs=COSTS, kill_switch=False, policy=QuotaPolicy(min_trades_per_day=2))
+    assert [s.symbol for s, _ in r.entries] != [] and len(r.entries) == 1
+    assert r.entries[0][0].symbol != "AAA"            # never re-enter a symbol traded today
 
 
 def test_kill_switch_rejects_every_signal(market, tmp_path):

@@ -46,6 +46,7 @@ class Trade:
     mae_r: float
     regime: str | None
     entry_minute: int       # minutes after the open
+    score: float = 0.0
 
     @property
     def risk_per_share(self) -> float:
@@ -121,6 +122,7 @@ class _Pos:
     signal_ts: datetime
     best: float
     worst: float
+    score: float = 0.0
 
 
 @dataclass
@@ -145,7 +147,8 @@ def _trade(sym: str, strat: Strategy, p: _Pos, raw: float, ts: datetime, reason:
         gross_r=(raw - p.raw_entry) * p.direction / raw_risk if raw_risk > 0 else 0.0,
         mfe_r=(p.best - p.entry) * p.direction / p.risk,
         mae_r=(p.worst - p.entry) * p.direction / p.risk,
-        regime=reg, entry_minute=int((p.entry_ts - s.bars[0].ts).total_seconds() // 60))
+        regime=reg, entry_minute=int((p.entry_ts - s.bars[0].ts).total_seconds() // 60),
+        score=p.score)
 
 
 def run_session(sd: SymbolData, k: int, strat: Strategy, costs: CostModel, *,
@@ -255,4 +258,5 @@ def _open(intent: EntryIntent, b: Bar, i: int, sig_ts: datetime, sym: str,
               else fill + d * (intent.target_r or 0.0) * risk)
     if (target - raw) * d <= 0:
         return None                                  # opened past the target
-    return _Pos(d, fill, raw, intent.stop, target, risk, i, b.ts, sig_ts, raw, raw)
+    return _Pos(d, fill, raw, intent.stop, target, risk, i, b.ts, sig_ts, raw, raw,
+                intent.score)

@@ -142,7 +142,8 @@ def check_new_entry(state: RiskState, *, symbol: str, direction: int, entry: flo
     if state.realized_pnl <= -limits.max_daily_loss_pct * state.start_equity:
         f.append(f"daily loss limit reached ({state.realized_pnl:+.2f} vs "
                  f"-{limits.max_daily_loss_pct:.1%} of {state.start_equity:.2f})")
-    if state.consecutive_losses >= limits.max_consecutive_losses:
+    if (limits.max_consecutive_losses is not None
+            and state.consecutive_losses >= limits.max_consecutive_losses):
         f.append(f"{state.consecutive_losses} consecutive losses — no new entries this session")
     if symbol in state.positions:
         f.append(f"already holding {symbol} — no adding, no averaging down")

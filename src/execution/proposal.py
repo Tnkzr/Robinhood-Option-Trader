@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from config.settings import RiskLimits
+from config.settings import QuotaPolicy, RiskLimits
+from src.execution.quota import FILL_FAMILY, tier_of
 from src.research.edge import EdgeVerdict, Status
-from src.risk.limits import RiskState, check_new_entry, position_size
+from src.risk.limits import MIN_NOTIONAL, RiskState, check_new_entry, position_size
 
 
 class ProposalRejected(ValueError):
@@ -30,16 +31,25 @@ class TradeProposal:
     limit_price: float
     stop_price: float
     target_price: float
-    shares: int
+    shares: float
     risk_dollars: float
     regime: str | None
     reasons_to_reject: tuple[str, ...]
     verdict: EdgeVerdict
+    tier: str = "validated"
 
     def __post_init__(self) -> None:
         f = []
-        if self.verdict.status is not Status.VALIDATED:
-            f.append(f"{self.strategy} has no validated edge ({self.verdict.status.value})")
+        expected = (FILL_FAMILY if self.tier == "quota_fill"
+                    else tier_of(self.verdict, QuotaPolicy()))
+        if self.tier not in ("validated", "provisional", "quota_fill"):
+            f.append(f"unknown tier {self.tier}")
+        elif self.tier == "quota_fill":
+            if self.verdict.strategy != FILL_FAMILY:
+                f.append("quota fills must carry the quota_fill verdict")
+        elif expected != self.tier:
+            f.append(f"{self.strategy} does not qualify as {self.tier} "
+                     f"({self.verdict.status.value})")
         if self.verdict.strategy != self.strategy or self.verdict.params != self.params:
             f.append("signal parameters differ from the validated parameter set")
         d = self.direction
@@ -51,8 +61,8 @@ class TradeProposal:
             f.append("entry trigger is required")
         if not self.reasons_to_reject:
             f.append("reasons to reject the setup must be stated")
-        if self.shares < 1:
-            f.append("size below one share")
+        if self.shares <= 0 or self.shares * self.limit_price < MIN_NOTIONAL:
+            f.append(f"order below the ${MIN_NOTIONAL:.2f} minimum")
         if f:
             raise ProposalRejected(f)
 
@@ -83,11 +93,19 @@ class TradeProposal:
     def render(self) -> str:
         v = self.verdict
         rows = [
+            ("Tier", {"validated": "validated edge",
+                      "provisional": "provisional — positive out-of-sample, NOT validated",
+                      "quota_fill": "quota fill — daily minimum, measured record below, "
+                                    "NOT an edge"}[self.tier]),
             ("Ticker", self.ticker), ("Strategy", f"{self.strategy} — {self.params}"),
             ("Direction", self.side), ("Entry trigger", self.entry_trigger),
             ("Limit", f"{self.limit_price:.2f}"), ("Stop", f"{self.stop_price:.2f}"),
-            ("Target", f"{self.target_price:.2f}"), ("Reward:risk", f"{self.risk_reward:.2f}"),
-            ("Size", f"{self.shares} sh, ${self.risk_dollars:.2f} at risk"),
+            *((("Target", "none — exit at the stop or the 15:45 ET flatten"),
+               ("Reward:risk", "open-ended (no target)")) if self.risk_reward >= 25 else
+              (("Target", f"{self.target_price:.2f}"),
+               ("Reward:risk", f"{self.risk_reward:.2f}"))),
+            ("Size", f"{self.shares:g} sh (${self.shares * self.limit_price:.2f}), "
+                     f"${self.risk_dollars:.2f} at risk"),
             ("Historical sample", f"{self.sample_size} OOS trades "
                                   f"({v.data_start} → {v.data_end})"),
             ("OOS win rate", f"{self.oos_win_rate:.1%}"),
@@ -105,18 +123,23 @@ def build_proposal(*, ticker: str, strategy: str, params: str, direction: int,
                    target_price: float, regime: str | None, reasons_to_reject: list[str],
                    verdicts: dict[str, EdgeVerdict], state: RiskState, limits: RiskLimits,
                    at: datetime, kill_switch: bool, min_rr: float = 1.0,
-                   min_regime_trades: int = 20, max_verdict_age_days: int = 45) -> TradeProposal:
+                   min_regime_trades: int = 20, max_verdict_age_days: int = 45,
+                   tier: str = "validated", policy: QuotaPolicy | None = None) -> TradeProposal:
     v = verdicts.get(strategy)
     if v is None:
         raise ProposalRejected([f"no research verdict for {strategy}"])
     fails = []
-    if v.status is not Status.VALIDATED:
-        fails.append(f"{strategy} is {v.status.value}: {'; '.join(v.reasons)}")
+    policy = policy or QuotaPolicy()
+    if tier == "quota_fill":
+        if strategy != FILL_FAMILY:
+            fails.append("only the quota_fill rule may fill the daily minimum")
+    elif tier_of(v, policy) != tier:
+        fails.append(f"{strategy} is {v.status.value}, not {tier}: {'; '.join(v.reasons)}")
     age = (at.date() - date.fromisoformat(v.data_end)).days
     if age > max_verdict_age_days:
         fails.append(f"verdict data ends {v.data_end} ({age}d old) — re-run research")
     rg = v.by_regime.get(regime or "unknown")
-    if rg and rg["n"] >= min_regime_trades and rg["expectancy_r"] <= 0:
+    if tier != "quota_fill" and rg and rg["n"] >= min_regime_trades and rg["expectancy_r"] <= 0:
         fails.append(f"{strategy} lost money in regime {regime} "
                      f"({rg['expectancy_r']:+.3f}R over {rg['n']} OOS trades)")
     risk = abs(limit_price - stop_price)
@@ -135,4 +158,4 @@ def build_proposal(*, ticker: str, strategy: str, params: str, direction: int,
         raise ProposalRejected(fails)
     return TradeProposal(ticker, strategy, params, direction, entry_trigger, limit_price,
                          stop_price, target_price, size.shares, size.risk_dollars, regime,
-                         tuple(reasons_to_reject), v)
+                         tuple(reasons_to_reject), v, tier)

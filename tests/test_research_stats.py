@@ -224,3 +224,43 @@ def test_proposal_object_cannot_be_built_around_the_gate():
     with pytest.raises(ProposalRejected):
         TradeProposal("XYZ", "orb", "orb(x)", 1, "x", 100.0, 99.0, 102.0, 10, 10.0, None,
                       (), validated())
+
+
+# ------------------------------- quota tiers --------------------------------
+
+def test_tiers_follow_measured_results_only():
+    from config.settings import QuotaPolicy
+    from src.execution.quota import signal_families, tier_of
+    pol = QuotaPolicy()
+    pos = validated(strategy="a", status=Status.NO_EDGE,
+                    oos={"n": 199, "win_rate": 0.5, "expectancy_r": 0.07, "profit_factor": 1.2})
+    thin = validated(strategy="b", status=Status.INSUFFICIENT_DATA,
+                     oos={"n": 89, "win_rate": 0.5, "expectancy_r": 0.30, "profit_factor": 2})
+    neg = validated(strategy="c", status=Status.NO_EDGE,
+                    oos={"n": 999, "win_rate": 0.5, "expectancy_r": -0.01, "profit_factor": 0.9})
+    assert tier_of(pos, pol) == "provisional"
+    assert tier_of(thin, pol) is None and tier_of(neg, pol) is None
+    assert tier_of(validated(), pol) == "validated"
+    fams = signal_families({"orb": validated(), "a": pos, "b": thin, "c": neg}, pol)
+    assert fams == [("orb", "validated"), ("a", "provisional")]
+
+
+def test_provisional_and_fill_proposals_are_labelled():
+    pos = validated(status=Status.NO_EDGE)
+    p = propose(verdict=pos, tier="provisional")
+    assert p.tier == "provisional" and "NOT validated" in p.render()
+    with pytest.raises(ProposalRejected):
+        propose(verdict=pos)                              # cannot pose as validated
+    with pytest.raises(ProposalRejected):
+        propose(tier="quota_fill")                        # only quota_fill may fill
+    with pytest.raises(ProposalRejected):
+        propose(verdict=validated(status=Status.NO_EDGE,
+                oos={"n": 500, "win_rate": 0.4, "expectancy_r": -0.1, "profit_factor": 0.8}),
+                tier="provisional")
+
+
+def test_fractional_proposal_at_fifty_dollars():
+    p = propose(state=RiskState(session=AT.date(), start_equity=50), limit_price=777.83,
+                stop_price=775.5, target_price=781.3)
+    assert 0 < p.shares < 1 and p.shares * p.limit_price == pytest.approx(5.0, abs=0.01)
+    assert "$5.00" in p.render()

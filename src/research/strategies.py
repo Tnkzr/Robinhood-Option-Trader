@@ -75,6 +75,7 @@ class EntryIntent:
     target_r: float | None = None
     target_price: float | None = None
     note: str = ""
+    score: float = 0.0           # cross-sectional rank key (quota fills)
 
 
 class Strategy:
@@ -276,11 +277,37 @@ class LateDayMomentum(Strategy):
                            note=f"late momentum ({self.p['signal']})")
 
 
+class QuotaFill(Strategy):
+    """Fills the owner's daily trade minimum — not an edge claim.
+
+    At the checkpoint bar every symbol is a candidate, ranked by the day's move
+    from the open in ATR units (strongest first); stop 0.25 ATR below; no target,
+    exit at the stop or the 15:45 flatten. Long only.
+
+    History: v1 (2026-10-13) admitted only symbols above VWAP with EMA9 > EMA20;
+    on weak days that left too few candidates to reach the minimum (53/90 days),
+    so v2 admits every symbol. Changed for coverage of the owner's requirement,
+    not for returns; both versions' results are in the ledger.
+    """
+
+    family = "quota_fill"
+    DEFAULTS = {"checkpoint_min": 240, "stop_atr": 0.25}
+
+    def on_bar(self, c: BarContext) -> EntryIntent | None:
+        if c.minutes_since_open != self.p["checkpoint_min"]:
+            return None
+        b = c.bar
+        return EntryIntent(1, b.close - self.p["stop_atr"] * c.atr, target_r=50.0,
+                           note="quota fill (relative strength)",
+                           score=(b.close - c.bars[0].open) / c.atr)
+
+
 BOTH_SIDES = (OpeningRangeBreakout, VwapPullback, MomentumContinuation, VwapMeanReversion)
 
 FAMILIES: dict[str, type[Strategy]] = {
     cls.family: cls for cls in
-    (*BOTH_SIDES, *(long_only(c) for c in BOTH_SIDES), OpeningRangeToClose, LateDayMomentum)
+    (*BOTH_SIDES, *(long_only(c) for c in BOTH_SIDES), OpeningRangeToClose, LateDayMomentum,
+     QuotaFill)
 }
 
 # Families the account can actually trade (no short selling).

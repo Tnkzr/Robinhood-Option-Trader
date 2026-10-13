@@ -137,7 +137,7 @@ def preflight(
                  f"{r.risk_per_trade_pct:.2%} risk cap")
     if daily_pnl_pct <= -r.max_daily_loss_pct:
         f.append(f"daily loss limit hit ({daily_pnl_pct:.1%})")
-    if consecutive_losses >= r.max_consecutive_losses:
+    if r.max_consecutive_losses is not None and consecutive_losses >= r.max_consecutive_losses:
         f.append(f"{consecutive_losses} consecutive losses — no new entries this session")
 
     return GateResult(passed=not f, failures=f)

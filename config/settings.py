@@ -86,11 +86,27 @@ class RiskLimits:
     max_position_pct: float = 0.10       # capital committed per trade
     fractional_shares: bool = True       # market orders only, regular hours
     max_daily_loss_pct: float = 0.02     # of start-of-day equity; no new entries after
-    max_consecutive_losses: int = 3      # per session; no new entries after
-    max_positions: int = 3
+    # Owner, 2026-10-13: minimum 8 trades a day, several at once. A loss-streak
+    # halt would contradict that quota, so it is off (None); the daily loss
+    # limit still stops all new entries.
+    max_consecutive_losses: int | None = None
+    max_positions: int = 8
     max_gross_leverage: float = 1.0      # notional / equity; >1 needs explicit approval
     allow_short: bool = False            # account must support it; off until verified
     cooldown_after_loss_min: float = 15.0  # same-symbol re-entry block after a loss
+
+
+@dataclass(frozen=True)
+class QuotaPolicy:
+    """Owner's instruction 2026-10-13: at least 8 trades per session.
+
+    Signals come first from strategies with positive out-of-sample expectancy
+    after costs; at the checkpoint any shortfall is filled by the quota-fill rule,
+    whose own measured record is shown on every fill.
+    """
+    min_trades_per_day: int = 8
+    checkpoint_min: int = 240            # bar closing 13:30 ET (12:30 CT)
+    provisional_min_oos_trades: int = 100
 
 
 @dataclass(frozen=True)
