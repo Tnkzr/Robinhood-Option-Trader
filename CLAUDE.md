@@ -142,6 +142,10 @@ note it in one line and stop.
 2. Kill switch present → no entries; still manage and flatten.
 3. Ensure the previous session's bars are stored: fetch `day` and `5minute`
    bars for `config/universe.py` (≤10 symbols per call) and `scripts.ingest`.
+   `scripts.ingest` reads only results the harness saved to a file; small
+   results come back inline. So fetch `day` bars from 2025-01-01 and `5minute`
+   bars from the previous session's 9:30 ET open — big enough to be saved, and
+   the overlap with stored bars doubles as a split check. Never retype bars.
 4. `send_later` at `eod_safety_utc` → "AUTONOMOUS: step C — end-of-day flatten",
    and at `postclose_utc` → "AUTONOMOUS: step D — post-close".
 5. `send_later` at `next_cycle_utc` → "AUTONOMOUS: step B — trading cycle"
@@ -152,8 +156,9 @@ note it in one line and stop.
 **B. Trading cycle (every 5 minutes, ~1 min after each bar closes)**
 1. **First** `send_later` the next cycle at `next_cycle_utc` (if not null), so a
    failure mid-cycle can't break the chain.
-2. Fetch today's 5-minute bars from 9:30 ET for the universe, 10 symbols per call
-   (3 calls); `python -m scripts.ingest <saved files>`.
+2. Fetch 5-minute bars from the **previous session's** 9:30 ET open to now for the
+   universe, 10 symbols per call (3 calls) — today alone is too small to be saved
+   to a file early in the day; `python -m scripts.ingest <saved files>`.
 3. `python -m scripts.live scan --equity E` (E = current `get_portfolio` value).
 4. **Exits first.** For each exit: `get_equity_positions` for the exact shares,
    `place_equity_order` sell, type `market`, `regular_hours`, fresh `ref_id`;
