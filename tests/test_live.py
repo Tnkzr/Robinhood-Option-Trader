@@ -123,10 +123,10 @@ def test_quota_fills_only_at_checkpoint_up_to_the_minimum(market, tmp_path):
     d = days[-1]
     vs = {"quota_fill": fill_verdict(d)}
     j = LiveJournal(tmp_path / "q.jsonl")
-    before = datetime.combine(d, time(13, 25, 30), ET).astimezone(timezone.utc)
+    before = datetime.combine(d, time(9, 45, 30), ET).astimezone(timezone.utc)
     assert scan(st, vs, j, now=before, equity=1e6, symbols=SYMS, limits=BIG, costs=COSTS,
                 kill_switch=False).entries == []
-    at = datetime.combine(d, time(13, 30, 30), ET).astimezone(timezone.utc)
+    at = datetime.combine(d, time(9, 50, 30), ET).astimezone(timezone.utc)
     r = scan(st, vs, j, now=at, equity=1e6, symbols=SYMS, limits=BIG, costs=COSTS,
              kill_switch=False, policy=QuotaPolicy(min_trades_per_day=2))
     assert len(r.entries) == 2 and all(p.tier == "quota_fill" for _, p in r.entries)
@@ -143,7 +143,7 @@ def test_quota_counts_todays_journal_entries(market, tmp_path):
     j.record_entry(session=d, symbol="AAA", strategy="orb_long", params="k", direction=1,
                    signal_ts="x", entry_ts=datetime.combine(d, time(10), ET).isoformat(),
                    fill=1.0, shares=1.0, stop=0.5, target=2.0, order_id="o")
-    at = datetime.combine(d, time(13, 30, 30), ET).astimezone(timezone.utc)
+    at = datetime.combine(d, time(9, 50, 30), ET).astimezone(timezone.utc)
     r = scan(st, {"quota_fill": fill_verdict(d)}, j, now=at, equity=1e6, symbols=SYMS,
              limits=BIG, costs=COSTS, kill_switch=False, policy=QuotaPolicy(min_trades_per_day=2))
     assert [s.symbol for s, _ in r.entries] != [] and len(r.entries) == 1

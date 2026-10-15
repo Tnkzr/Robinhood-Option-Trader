@@ -105,7 +105,7 @@ class QuotaPolicy:
     whose own measured record is shown on every fill.
     """
     min_trades_per_day: int = 8
-    checkpoint_min: int = 240            # bar closing 13:30 ET (12:30 CT)
+    checkpoint_min: int = 20             # bar closing 09:50 ET (08:50 CT) — owner, 2026-10-15
     provisional_min_oos_trades: int = 100
 
 

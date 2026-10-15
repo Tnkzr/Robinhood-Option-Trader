@@ -78,7 +78,7 @@ def main() -> int:
 
     lines = [f"# Daily-minimum system — run {run_id}", "",
              f"Policy: ≥{policy.min_trades_per_day} trades/day, fills at minute "
-             f"{policy.checkpoint_min} (13:30 ET). Signal families: "
+             f"{policy.checkpoint_min} (09:50 ET). Signal families: "
              f"{', '.join(f'{f} ({t})' for f, t in fams) or 'none'}. "
              f"{len(oos_days)} walk-forward out-of-sample sessions "
              f"({oos_days[0]} → {oos_days[-1]}); holdout untouched.", "",

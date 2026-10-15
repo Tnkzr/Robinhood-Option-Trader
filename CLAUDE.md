@@ -25,8 +25,9 @@ produced the record in `PLAYBOOK.md` and `journal/`; they are history, not polic
 2. **Never fabricate** a price, indicator value, news item, fill, sample size,
    win rate or probability. Every statistic comes from code run on stored data.
 3. **Daily minimum: 8 trades** (owner, 2026-10-13: "a minimum of 8 trades per
-   day … multiple trades going at the same time"). Natural signals first; at
-   13:30 ET (12:30 CT) the shortfall is filled by `quota_fill`. The minimum never
+   day … multiple trades going at the same time"). At 09:50 ET (08:50 CT —
+   owner, 2026-10-15: "do 8:50") the shortfall is filled by `quota_fill`;
+   natural signals continue all day on top. The minimum never
    overrides the daily loss limit, the kill switch, the position cap or the
    entry cutoff — on such days fewer than 8 is correct.
 4. **Flat by the close.** No new entries after 3:15 PM ET (2:15 CT); begin closing
@@ -50,11 +51,12 @@ calibrated costs (`research/reports/`):
 | ORB-5 to close · late-day momentum | 181 · 1,000 | 0.000R · −0.040R | not traded |
 | Momentum · VWAP mean reversion (long) | 89 · 41 | −0.214R · −0.192R | not traded |
 
-**Daily-minimum system** (`scripts.quota_research`, 90 OOS sessions, trades the
-replay accepted under live limits): natural signals +0.026R (CI −0.089…+0.146),
-quota fills **−0.271R** (CI −0.356…−0.186 — reliably losing), whole system
-**−0.084R** (CI −0.170…+0.004); 8+ trades on 90/90 days; at $50: −4.1%
-(−$2.06), max drawdown 7.7%. The minimum is the owner's choice and it costs
+**Daily-minimum system** (`scripts.quota_research`, 93 OOS sessions, trades the
+replay accepted under live limits), fills at 09:50 ET: natural signals −0.013R,
+quota fills −0.027R (CI −0.179…+0.132), whole system **−0.023R** (CI
+−0.152…+0.112); 8+ trades on 93/93 days; at $50: −1.4% (−$0.70), max drawdown
+5.4%. (The earlier 13:30 ET fill time measured −0.271R for fills, −0.084R
+system.) The minimum is the owner's choice and it costs
 expected return; report that plainly whenever results are discussed. The
 holdout (last 30 sessions) has never been opened.
 
@@ -65,7 +67,7 @@ holdout (last 30 sessions) has never been opened.
 | Capital committed per trade (share notional / option premium) | **≤ 10%** of equity |
 | Loss at the stop per trade | **≤ 10%** of equity |
 | Daily loss → no new entries | 2% of start-of-day equity |
-| Daily minimum trades (owner, 2026-10-13) | 8 — fills at 13:30 ET |
+| Daily minimum trades (owner, 2026-10-13) | 8 — fills at 09:50 ET (08:50 CT) |
 | Consecutive-loss halt | off — it would contradict the daily minimum |
 | Max open positions | 8 |
 | Gross leverage | 1.0× |

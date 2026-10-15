@@ -291,7 +291,7 @@ class QuotaFill(Strategy):
     """
 
     family = "quota_fill"
-    DEFAULTS = {"checkpoint_min": 240, "stop_atr": 0.25}
+    DEFAULTS = {"checkpoint_min": 20, "stop_atr": 0.25}
 
     def on_bar(self, c: BarContext) -> EntryIntent | None:
         if c.minutes_since_open != self.p["checkpoint_min"]:
